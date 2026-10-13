@@ -5,7 +5,192 @@ pkmn-patched mode (`Compat::Pkmn`) is checked against the same Showdown with
 parity/showdown/patches.js. Numbers below come from `parity fuzz` runs on 2026-10-13; see
 docs/SIM_DESIGN.md for what is compared.
 
-## Parity summary
+## Parity summary (harness v2, after the simulator audit)
+
+Harness v2 compares more than v1, and each step is checked against Showdown:
+
+- the legal choices;
+- every PRNG call;
+- **every** public event the env's reveal memory consumes, in order;
+- the full state snapshot, including the hidden fields the mechanics read:
+  - `statusState.source` (self-inflicted sleep), `subFainted`, and the bench's modified stats;
+  - the trap partners, `moveThisTurn`, `trapped` / `maybeLocked`, and `maxpp`;
+  - the volatile insertion order.
+
+See docs/SIM_DESIGN.md.
+
+| Run (seed) | format | patch | teams | battles | steps compared | diverged |
+| --- | --- | --- | --- | ---: | ---: | ---: |
+| v1 (1001) | gen1ou | vanilla | mixed, Gen 5 + sodium seeds | 5,000 | 380,937 | 0 |
+| v2 (1002) | gen1ou | vanilla | targeted scenarios, Gen 5 + sodium seeds | 2,000 | 138,287 | 0 |
+| v3 (1003) | gen1ou | vanilla | thaw | 500 | 7,519 | 0 |
+| v4 (1004) | gen1ou | vanilla | random (any moves, DVs, levels) | 2,000 | 102,324 | 0 |
+| v5 (1005) | gen1ou | vanilla | stall | 1,000 | 151,739 | 0 |
+| v6 (1006) | gen1ou | vanilla | legal learnsets | 1,000 | 104,497 | 0 |
+| v7 (1007) | gen1nc | vanilla | random, sodium seeds | 1,000 | 48,411 | 0 |
+| v8 (1008) | gen1ou | pkmn | mixed | 1,000 | 73,321 | 0 |
+| v9 (1009) | gen1nc | pkmn | targeted | 1,000 | 66,823 | 0 |
+| **total** | | | | **14,500** | **1,073,858** | **0 (0.00%)** |
+
+Coverage in those matched steps:
+
+- Events: `-fail` 104k, `-miss` 89k, `-immune` 81k, `faint` 74k, `-crit` 59k, `cant slp` 25k,
+  Transform 22k, `-curestatus` 16k, Bide 13k, `cant partiallytrapped` 11k, confusion 10k,
+  Substitute 9.6k, `cant frz` 8.2k, recharge 6.2k, Mimic 5.6k, Disable 4.9k, freeze 1.1k.
+- Endings: Endless Battle Clause 324 times, the 1000-turn limit 30 times.
+
+The targeted scenarios hit Showdown's own "moveSlot is null" crash about once in 2,000 battles
+(below). Those battles are excluded; none occurred in these runs.
+
+**Divergences the v2 harness found, all fixed.** All three were invisible to v1:
+
+3. Substitute's `-fail` was missing when the user already has a Substitute or too little HP.
+   Category `events: showdown fail ours turn`: 51 of 500 battles. The native sim now emits the
+   `Fail` event.
+4. `setStatus` messages for status moves were missing:
+   - `-immune` for a Poison type hit by Toxic or Poison Gas (33 of 500 battles);
+   - `-fail` when the status is already set.
+   These feed the env's `immune` / `failed` observation bits.
+5. `trapped` / `maybeLocked` / `maybeDisabled` lived in the per-switch-in volatile state. Showdown
+   keeps them on the Pokémon: `clearVolatile` does not reset them, so a fainted active keeps
+   `trapped`. Category `state: .sides[].active.trapped`: 128 of 500. They moved to `Mon`. This had
+   no effect on legal choices; the stale values are never read.
+
+**Showdown crashes ("moveSlot is null").** Showdown 0.11.11 throws in `Side#commitChoices` when a
+sleeping or frozen Pokémon must "Fight" while its `lastSelectedMoveSlot` points past its current
+move slots. Example: a Mew picks Transform, its 4th move, against a one-move Jigglypuff, and is
+then put to sleep. Showdown gives no ground truth here, and fuzz runs exclude these battles. They
+are rare: 1 in about 2,000 targeted battles, 2 in the 40,998 v1 battles. The audit's repro hit the
+state in 111 of 200 seeds. The native simulator used to assert and panic here. It now reads move
+slot 0, as pkmn/engine does, and records that as `lastEnemySelectedMove`. Regression tests:
+`crates/sim-gen1/tests/robustness.rs`, `crates/sim-backend/tests/native.rs`, and
+`tests/python/test_env.py::test_move_slot_null_regression`.
+
+## Mutation testing (`parity/mutate.py`)
+
+Mutation testing checks whether the harness catches simulator bugs. Each mutant is a one-place
+source edit of sim-gen1/sim-core. The script rebuilds `parity` in a scratch copy and replays five
+recorded Showdown corpora without Node:
+
+- mixed: 1,000 battles;
+- stall: 400;
+- random gen1nc: 400;
+- targeted: 1,999 (one battle hit Showdown's crash);
+- thaw: 2,000.
+
+It also runs the fixtures. The cells give the number of divergent battles per corpus.
+
+- **Before** is the audit's run with harness v1. Its first 30 mutants were replayed on only the
+  first three corpora (`-`).
+- **After** is harness v2 with the targeted and thaw kinds.
+
+| | before (audit, harness v1) | after (harness v2) |
+| --- | --- | --- |
+| the audit's mutants caught (47 re-run; `dmg-roll-minus1`, a near-duplicate of `dmg-roll-div256`, dropped) | 37 / 47 | **41 / 47** |
+| all mutants (plus 5 new ones for hidden state and events, all caught) | – | **46 / 52** |
+| survivors | 10 | 6, all argued equivalent (no Gen 1 state tells them apart) |
+
+What changed:
+
+- Newly caught, survivors before:
+  - volatile order: `volOrder`, taken from the sim's own iteration;
+  - Mirror Move vs Mirror Move AfterMove: the new `mirror` scenario;
+  - Endless Battle Clause with a frozen side: the new `freeze` scenario;
+  - Mimic maxpp: `maxpp` is now in the snapshot.
+- Much stronger:
+  - `status_self`: 30 → 280 mixed, 489 thaw (the snapshot field);
+  - `sub_fainted`: 3 → 76 mixed;
+  - Fire thaw: 147 in the thaw corpus;
+  - the 997 damage cap: 5 → 15, through the `overkill` scenario.
+- Still rarely caught: Focus Energy crit /4 and confusion 1/256. They are inherently rare: a
+  Focus Energy user's crit roll must land in one narrow band, and the confusion secondary roll
+  must equal exactly 25 (1 in 256).
+- Survivors, all equivalent:
+  - `pt-source-hp-ignored`: removes a redundant check;
+  - `pt-source-ignored`, `fpt-counterpart-ignored`: the trap pair is always the two actives;
+  - `disable-bide-check`: during Bide the executed move is always Bide;
+  - `move-this-turn-ignored`: no Gen 1 path gives a Pokémon two move actions in one turn;
+  - `acc-no-1in256`: Gen 1 has no accuracy boosts or evasion drops, so the accuracy never exceeds
+    255.
+
+Full table, from `python3 parity/mutate.py --compare before.json`:
+
+| mutant | before | after (divergent battles: mixed / stall / random_nc / targeted / thaw / fixtures) | note |
+| --- | --- | --- | --- |
+| dmg-roll-range | caught (999 / 360 / 396 / - / - / fx 108) | caught (994 / 368 / 399 / 1901 / 2000 / fx 108) |  |
+| dmg-roll-div256 | caught (932 / 259 / 352 / - / - / fx 117) | caught (924 / 265 / 341 / 1409 / 1170 / fx 117) |  |
+| dmg-997cap | caught (0 / 0 / 0 / 5 / 0 / fx 0) | caught (0 / 0 / 0 / 15 / 0 / fx 0) |  |
+| crit-odd-basespe | caught (43 / 7 / 16 / - / - / fx 5) | caught (41 / 7 / 19 / 36 / 23 / fx 5) |  |
+| crit-high-x8 | caught (61 / 2 / 19 / - / - / fx 2) | caught (60 / 3 / 17 / 7 / 0 / fx 2) |  |
+| crit-focus-energy | caught (2 / 0 / 0 / 8 / 0 / fx 0) | caught (2 / 0 / 0 / 2 / 0 / fx 0) | Focus Energy crit /4 |
+| crit-uses-modified | caught (210 / 98 / 34 / - / - / fx 22) | caught (215 / 93 / 36 / 93 / 4 / fx 22) |  |
+| acc-no-1in256 | survived (0 / 0 / 0 / - / - / fx 0) | survived (0 / 0 / 0 / 0 / 0 / fx 0) | equivalent: Gen 1 has no accuracy boosts or evasion drops, so the computed accuracy never exceeds 255 |
+| acc-skip-roll-at-255 | caught (991 / 391 / 393 / 3253 / 500 / fx 130) | caught (983 / 388 / 386 / 1721 / 1816 / fx 130) |  |
+| recoil-round | caught (458 / 147 / 77 / - / - / fx 39) | caught (461 / 149 / 74 / 421 / 25 / fx 39) |  |
+| psywave-hi-plus1 | caught (116 / 128 / 25 / - / - / fx 14) | caught (110 / 129 / 22 / 91 / 0 / fx 14) |  |
+| counter-any-type | caught (74 / 35 / 13 / - / - / fx 5) | caught (64 / 28 / 12 / 137 / 0 / fx 5) |  |
+| counter-vs-counter-allowed | caught (1 / 7 / 0 / 55 / 0 / fx 0) | caught (3 / 5 / 1 / 20 / 0 / fx 0) |  |
+| confusion-selfhit-def | caught (15 / 18 / 4 / - / - / fx 2) | caught (10 / 22 / 8 / 2 / 0 / fx 2) |  |
+| bide-into-sub-x1 | caught (0 / 0 / 0 / 10 / 0 / fx 0) | caught (2 / 0 / 0 / 3 / 0 / fx 0) |  |
+| speedtie-reverse | caught (181 / 160 / 36 / - / - / fx 15) | caught (188 / 158 / 34 / 371 / 111 / fx 15) |  |
+| speedtie-no-rng | caught (857 / 318 / 73 / - / - / fx 80) | caught (854 / 320 / 68 / 1398 / 1110 / fx 80) |  |
+| vol-order-reverse | survived (0 / 0 / 0 / 0 / 0 / fx 0) | caught (337 / 299 / 93 / 749 / 85 / fx 55) | volatile order |
+| sec-skip-roll-if-statused | caught (424 / 3 / 74 / - / - / fx 37) | caught (426 / 3 / 86 / 387 / 668 / fx 37) |  |
+| sec-confusion-no-minus1 | caught (1 / 0 / 0 / 1 / 0 / fx 0) | caught (1 / 0 / 1 / 0 / 0 / fx 0) | confusion 1/256 |
+| freeze-thaw-wrong | caught (0 / 0 / 0 / 0 / 130 / fx 0) | caught (1 / 0 / 1 / 0 / 147 / fx 0) | Fire thaw |
+| status-self-ignored | caught (30 / 4 / 0 / 1 / 0 / fx 1) | caught (280 / 118 / 31 / 190 / 489 / fx 27) | status_self |
+| slp-rest-3 | caught (332 / 99 / 25 / - / - / fx 27) | caught (280 / 116 / 31 / 180 / 489 / fx 27) |  |
+| slp-range-1-7 | caught (537 / 105 / 114 / - / - / fx 26) | caught (519 / 123 / 129 / 368 / 498 / fx 26) |  |
+| slp-wake-ge | caught (373 / 89 / 91 / - / - / fx 0) | caught (341 / 111 / 101 / 274 / 417 / fx 0) |  |
+| toxic-leechseed-no-inc | caught (2 / 1 / 0 / 69 / 0 / fx 0) | caught (2 / 5 / 0 / 57 / 0 / fx 0) | Leech Seed Toxic counter |
+| bench-par-speed-not-reapplied | caught (502 / 8 / 97 / - / - / fx 46) | caught (486 / 7 / 87 / 315 / 0 / fx 46) |  |
+| stat-999-cap-1000 | caught (67 / 55 / 19 / - / - / fx 11) | caught (68 / 43 / 12 / 122 / 0 / fx 11) |  |
+| rest-255-bug-removed | caught (3 / 1 / 0 / 3 / 2 / fx 1) | caught (1 / 1 / 0 / 1 / 4 / fx 1) |  |
+| pp-no-wrap | caught (12 / 22 / 5 / - / - / fx 2) | caught (15 / 31 / 4 / 29 / 1 / fx 2) |  |
+| pp-twoturn-both | caught (382 / 0 / 136 / - / - / fx 50) | caught (397 / 0 / 137 / 353 / 0 / fx 50) |  |
+| pp-metronome-refund | caught (2 / 11 / 1 / 172 / 0 / fx 2) | caught (1 / 7 / 0 / 78 / 0 / fx 2) | Metronome/Mirror PP refund |
+| pp-transform-5to4 | caught (80 / 122 / 36 / - / - / fx 12) | caught (89 / 126 / 31 / 216 / 0 / fx 12) |  |
+| transform-mimic-pp-writeback | caught (63 / 101 / 22 / 462 / 0 / fx 6) | caught (63 / 103 / 28 / 200 / 0 / fx 6) |  |
+| mimic-maxpp-ups0 | survived (0 / 0 / 0 / - / - / fx 0) | caught (73 / 119 / 24 / 236 / 0 / fx 16) | maxpp (hidden) |
+| transform-maxpp-ups0 | - | caught (89 / 126 / 31 / 216 / 0 / fx 12) | maxpp (hidden), new |
+| sub-hp-no-plus1 | caught (290 / 118 / 30 / - / - / fx 24) | caught (284 / 119 / 20 / 557 / 594 / fx 24) |  |
+| sub-fainted-unset | caught (3 / 0 / 1 / 22 / 0 / fx 0) | caught (76 / 18 / 5 / 210 / 370 / fx 10) | sub_fainted |
+| hyperbeam-recharge-on-ko | caught (201 / 2 / 11 / - / - / fx 18) | caught (212 / 4 / 14 / 339 / 0 / fx 18) |  |
+| pt-source-ignored | survived (0 / 0 / 0 / 0 / 0 / fx 0) | survived (0 / 0 / 0 / 0 / 0 / fx 0) | pt_source (accuracy); equivalent: a trapped target's trapper is always the active foe within a turn (switching ends the trap) |
+| pt-source-hp-ignored | survived (0 / 0 / 0 / 0 / 0 / fx 0) | survived (0 / 0 / 0 / 0 / 0 / fx 0) | pt_source (end of turn); equivalent: removes a redundant check: foe_has() already requires hp > 0 |
+| fpt-counterpart-ignored | survived (0 / 0 / 0 / 0 / 0 / fx 0) | survived (0 / 0 / 0 / 0 / 0 / fx 0) | fpt_counterpart; equivalent: the fake-trap pair is always the two actives, and re-adding updates the counterpart |
+| pt-maybelocked-unset | caught (88 / 172 / 35 / 827 / 211 / fx 20) | caught (88 / 170 / 28 / 383 / 354 / fx 20) |  |
+| disable-bide-check | survived (0 / 0 / 0 / 0 / 0 / fx 0) | survived (0 / 0 / 0 / 0 / 0 / fx 0) | Disable/Bide; equivalent: while Bide is active the executed move is always lastSelectedMove = Bide |
+| disable-picks-0pp-slots | caught (1 / 16 / 0 / 28 / 0 / fx 0) | caught (1 / 15 / 0 / 14 / 0 / fx 0) |  |
+| move-this-turn-ignored | survived (0 / 0 / 0 / 0 / 0 / fx 0) | survived (0 / 0 / 0 / 0 / 0 / fx 0) | move_this_turn guard; equivalent: no Gen 1 path runs a second move action for the same Pokémon in a turn |
+| mirror-mirror-aftermove | survived (0 / 0 / 0 / 0 / 0 / fx 0) | caught (0 / 0 / 0 / 8 / 0 / fx 0) | Mirror-Mirror AfterMove |
+| endless-frz-ignored | survived (0 / 0 / 0 / 0 / 0 / fx 0) | caught (0 / 0 / 0 / 122 / 0 / fx 0) | Endless Clause freeze |
+| trapped-cleared-on-faint | - | caught (306 / 101 / 48 / 192 / 0 / fx 37) | trapped (hidden), new |
+| sub-fail-event-dropped | - | caught (95 / 69 / 8 / 320 / 358 / fx 0) | event, new |
+| status-immune-event-dropped | - | caught (119 / 79 / 14 / 92 / 0 / fx 0) | event, new |
+| disable-event-wrong-move | - | caught (65 / 106 / 19 / 250 / 0 / fx 0) | event, new |
+
+
+## Robustness
+
+The simulator audit found that the public API could panic. All of these are fixed and covered by
+tests:
+
+| Issue | Fix | Tests |
+| --- | --- | --- |
+| A1: "moveSlot is null" assert on a legal state (Showdown crash case) | read slot 0 (pkmn's choice) | Rust (sim-gen1, sim-backend) + Python regression |
+| A2: illegal choices accepted silently or panicking: switch to self/fainted/missing, 0-PP or disabled moves, out-of-range indices | `apply_choices` / `Generation::update` return `IllegalChoice`, battle untouched; `*_unchecked` for the env hot path | `illegal_choices_are_rejected`, `is_legal_matches_choices` (every choice × many states) |
+| A3: `from_bytes` checked only sizes and enums | `Battle::validate`: every id, count, range and cross-field invariant; env blobs also validate the reveal memories and reject games without legal choices | every reachable state round-trips; 40,000 random corruptions of mid-game battle blobs (~7,000 accepted) and 20,000 of env blobs step without a panic (944 panics without validation) |
+| A4: `Battle::new` panicked on empty/7-Pokémon teams and bad ids | returns `TeamError` | `new_rejects_malformed_teams` |
+| One panic poisoned the whole `VecEnv` | per-env `catch_unwind`: outcome 5 (`error`), `info["error"]`/`["errors"]`, env reset | `panics_are_isolated_per_env` (other envs bit-identical to an unpoisoned run), Python `test_panic_is_isolated_per_env` |
+
+`restore_state` blobs for the `pkmn` backend are still trusted. The engine's state is an opaque
+byte layout that we do not validate.
+
+## Parity summary (harness v1)
+
+These are the earlier runs. They compared legal choices, PRNG calls and state; the event stream
+check covered only moves, switches and `cant` reasons, and only for e1-e3.
 
 | Run (seed) | format | patch | teams | battles | steps compared | diverged |
 | --- | --- | --- | --- | ---: | ---: | ---: |
@@ -33,11 +218,11 @@ The coverage data counts how often each feature occurred in those matched steps:
   15k, Disable 13k, Mimic 12k, freeze 2.4k, `cant flinch` 1.6k.
 - Endings: Endless Battle Clause and the 1000-turn limit.
 
-**Showdown crashes (excluded):** 2 of 40,998 battles. Showdown itself throws "moveSlot is null"
-in `Side#commitChoices`, a 0.11.11 bug when a Pokémon whose `lastSelectedMoveSlot` points past its
-current move slots must "Fight". The native sim raises the same assertion.
+**Showdown crashes (excluded):** 2 of 40,998 battles. These are the "moveSlot is null" crash
+described above.
 
-**Divergences found and fixed during development** (the fuzzer's categories led to each):
+**Divergences found and fixed during development** (the fuzzer's categories led to each; v2's
+are listed above):
 
 1. Recoil. Showdown's gen4 mod (inherited by Gen 1) overrides `applyRecoilDamage` with `floor`,
    not `round`. Category `state: .sides[].team[].hp`: 22/40 battles before the fix.
@@ -94,8 +279,8 @@ the obvious next optimisations.
 | Endless Battle Clause (Gen 1 no-progress tie), 1000-turn limit | yes | yes | – |
 | PRNG: Gen 5 LCG and sodium (ChaCha20) seeds | yes | yes | – |
 | `Compat::Pkmn` (pkmn's patched Showdown) | yes | yes (f6, f7) | – |
-| Protocol text log | no (structured `Event` stream only) | event stream checked (e1-e3) | – |
-| Team validation, team preview, Gen 1 Stadium, other gens | no | – | – |
+| Protocol text log | no (structured `Event` stream only) | every event the env consumes (harness v2) | – |
+| Team validation, team preview, Gen 1 Stadium, other gens | no (the env validates teams: Species Clause, learnsets) | – | – |
 
 ## Moves
 

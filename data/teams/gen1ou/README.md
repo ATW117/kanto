@@ -5,11 +5,17 @@
 | File | What |
 | --- | --- |
 | `teams.jsonl` | **The pool.** 9,232 distinct teams, one JSON object per line, in the DESIGN.md team schema. |
+| `split/train.jsonl`, `split/eval.jsonl` | Deterministic 90/10 train / held-out eval split of the pool (8,300 / 932 teams), written by `split.py`. Load them as `data/teams/gen1ou:train` / `:eval`. |
+| `split.py` | Writes the split. A team is in `eval` iff SHA-256 of its canonical JSON (sorted keys, no whitespace) is 0 mod 10, so the assignment depends only on the team itself. `--check` verifies the files are current. Re-run it after editing `teams.jsonl`. |
 | `validate.py` | Schema + legality check (Showdown's own `TeamValidator` for `gen1ou`, run through `validate_ps.js`). |
 | `validate_ps.js` | Node helper for `validate.py`. Needs a `pokemon-showdown` npm package. |
 | `generate.py` | Samples extra teams from Smogon usage stats (a fallback or augmentation; not used for `teams.jsonl`). |
 | `usage/gen1ou-1630-2026-09.json` | Smogon "chaos" usage stats snapshot used by `generate.py`. |
 | `usage/gen1_names.json` | Showdown id to display-name map for Gen 1 species and moves (from `Dex.mod('gen1')`). |
+
+The env loaders (`TeamSource::from_spec`, `pokemon_env.VecEnv(teams=...)`) check every team for
+Gen 1 legality: Species Clause, learnsets and a consistent HP DV. They reject out-of-range DVs, levels
+and unknown names. The whole pool passes; `validate=False` turns off the legality part.
 
 **Format choice: one `teams.jsonl`, not one file per team.** About 9k files would be unwieldy. A
 loader should read `data/teams/gen1ou/*.jsonl` (one team per non-empty line), and may also accept

@@ -156,6 +156,33 @@ counters of the observing player's own active Pokémon, which a Showdown player 
 
 Do not train on these if the policy is meant to play on Showdown.
 
+## Masks with a built-in opponent
+
+With `VecEnv(..., opponent="random" | "max_damage")` player 2 is played in Rust, so both of its
+rows are blank: `obs[:, 1]` is all zeros and `mask[:, 1]` is all `False`. The opponent's legal
+actions are part of the hidden state (they leak, for example, whether it is trapped), so they are
+not exposed. `actions[:, 1]` is ignored.
+
+## The opponent's action in the observer's frame (`info["opp_action_obs_frame"]`)
+
+`step` returns `info["opp_action_obs_frame"]`, an `int16[N, 2]` array. Entry `[i, p]` is what player
+`1 - p` chose in that step, expressed in player `p`'s frame. It is meant as an auxiliary prediction
+target (for example, the PPO agent's opponent-action head). The opponent's own action index is
+not usable for this: its switch indices are the opponent's original team slots, which the observer
+cannot see.
+
+| Value | Meaning |
+| --- | --- |
+| -1 (`OPP_ACTION_NONE`) | the opponent had no decision (it passed while the observer made a forced switch) |
+| 0 | a move choice that names no move: recharging, Gen 1's single "Fight" option while asleep, frozen or partially trapped, and (pkmn backend) locked-in turns |
+| 1..165 | the move chosen, by move ID (the native backend names locked moves such as Thrash, Bide or a continued Wrap; Struggle is 165) |
+| 166 + j (`OPP_ACTION_SWITCH_BASE + j`) | a switch to the opponent Pokémon in appearance-order slot j, the observer's `opp_mon` block j (a Pokémon seen for the first time takes the next slot) |
+
+There are `OPP_ACTION_CLASSES = 172` classes. The label describes the choice, not what happened. A
+chosen move counts even if the user then could not act (full paralysis, a faint first). The value
+is computed before an auto-reset, so it is valid on `done` steps as well. With a built-in opponent,
+`[:, 0]` is the bot's choice as player 1 sees it.
+
 ## Reveal memory
 
 Reveal memory follows OBSERVATION_RULES.md §3, driven by pkmn's `-Dlog` protocol (see

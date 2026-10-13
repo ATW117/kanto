@@ -15,8 +15,9 @@ behaviour change); the table's notes say which, where known.
     python3 parity/mutate.py --compare before.json   # add a "before" column from an earlier run
 
 Dumps are generated on first use (needs Node and pokemon-showdown: PS_DIR, NODE) into
---dumps (default parity/out/mutate/dumps); delete them after changing the runner or snapshot.
-The source tree is never modified: mutants are applied to the copy in --work.
+--dumps (default parity/out/mutate/dumps); delete them after changing the runner, the snapshot
+or the fuzz team generators. The source tree is never modified: mutants are applied to the copy
+in --work (incremental builds there take ~10 s per mutant; a full run takes ~15 minutes).
 """
 
 from __future__ import annotations
@@ -40,7 +41,7 @@ CORPORA = [
     ("stall", ["--battles", "400", "--teams", "stall", "--seed", "7102"]),
     ("random_nc", ["--battles", "400", "--teams", "random", "--format", "gen1nc", "--prng", "sodium", "--seed", "7103"]),
     ("targeted", ["--battles", "2000", "--teams", "targeted", "--prng", "mixed", "--seed", "7104"]),
-    ("thaw", ["--battles", "500", "--teams", "thaw", "--seed", "7105"]),
+    ("thaw", ["--battles", "2000", "--teams", "thaw", "--seed", "7105"]),
 ]
 
 G = "crates/sim-gen1/src/"
@@ -124,6 +125,7 @@ EQUIVALENT = {
     "pt-source-ignored": "a trapped target's trapper is always the active foe within a turn (switching ends the trap)",
     "disable-bide-check": "while Bide is active the executed move is always lastSelectedMove = Bide",
     "move-this-turn-ignored": "no Gen 1 path runs a second move action for the same Pokémon in a turn",
+    "acc-no-1in256": "Gen 1 has no accuracy boosts or evasion drops, so the computed accuracy never exceeds 255",
 }
 
 

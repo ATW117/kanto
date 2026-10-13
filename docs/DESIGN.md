@@ -52,6 +52,8 @@ Deviations from the original sketch (Stage 2 implementation):
   shared encoder on it, so Stage 3 only needs to implement `view`.
 - Battles start with both players' only choice being `Pass`; the env auto-plays that update (the
   leads are sent out) on reset.
+- `choice_move(b, player, c) -> u8` (default 0) names the move a move choice selects. It feeds
+  the observer-frame opponent-action label (`info["opp_action_obs_frame"]`).
 `Outcome` = ongoing / p1 win / p2 win / tie. Turn cap: 1000 turns -> tie (truncated).
 
 ## Python API (`pokemon_env`)
@@ -63,11 +65,20 @@ obs, mask, reward, done, info = env.step(actions)   # actions: int16[N, 2]
 env.clone_state(i) -> bytes / env.restore_state(i, blob)   # for search
 ```
 Implemented details: `reward` is float32[N, 2]; `info` = {`outcome` int8[N] (0 ongoing, 1 p1 win,
-2 p2 win, 3 tie, 4 truncated), `truncated` bool[N], `turns` uint32[N]}; output arrays are reused
-in place every call (copy to keep). `teams` may also be `"random"` (legal Gen 1 learnsets),
-`"randbats"` (Showdown Gen 1 random-battle sets) or `"builtin"` (fixtures). `reveal_hidden=False`
+2 p2 win, 3 tie, 4 truncated, 5 error), `truncated` bool[N], `turns` uint32[N],
+`opp_action_obs_frame` int16[N, 2] (the opponent's choice in each player's frame, an auxiliary
+target; docs/OBSERVATION.md), `error` bool[N] and `errors` [(env, message)]}; output arrays are
+reused in place every call (copy to keep). `teams` may also be `"random"` (legal Gen 1 learnsets),
+`"randbats"` (Showdown Gen 1 random-battle sets), `"builtin"` (fixtures) or
+`"data/teams/gen1ou:train"` / `":eval"` (the pool's deterministic 90/10 split). Pool teams are
+checked for Gen 1 legality (Species Clause, learnsets) unless `validate=False`. `reveal_hidden=False`
 (debug flag, see Observation). With a built-in opponent, `actions[:, 1]` is ignored and `obs[:, 1]`
-is zero. Illegal actions raise `ValueError` before any env is modified.
+and `mask[:, 1]` are zero. Illegal actions raise `ValueError` before any env is modified.
+- **Panic isolation.** Each env is stepped under `catch_unwind`. If the simulator panics in one
+  env, only that env's game ends: outcome 5 (`error`), `done` and `truncated` set, reward 0, the
+  message in `info["errors"]`. The env is then reset with new teams, and the other envs carry on.
+  No panic is known (the parity harness and the robustness fuzz tests look for them), so this is
+  a safety net.
 - Both players are controlled by the caller: the agent plays both sides in self-play, or one side
   with a built-in opponent policy (`opponent="random" | "max_damage"`) handled in Rust.
 - `step` releases the GIL, steps all battles in parallel (rayon), auto-resets finished battles

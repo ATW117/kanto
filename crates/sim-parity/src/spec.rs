@@ -122,7 +122,7 @@ pub enum TeamKind {
     /// Substitute, trapping + switching, PP stalling, Toxic + Leech Seed, boosts, the Endless
     /// Battle Clause, Bide, speed ties, OHKO and friends.
     Targeted,
-    /// The `thaw` scenario only: freezing moves against Fire moves (Fire thaws a frozen target).
+    /// Freeze-and-thaw battles ([`thaw_teams`]): Ice, Fire and stalling moves on both sides.
     Thaw,
 }
 
@@ -141,13 +141,15 @@ impl TeamKind {
     }
 }
 
-/// Targeted scenarios: (name, move pool of one side, move pool of the other). The first 13 are
-/// ported from the simulator audit's generator; `freeze` (both last Pokémon frozen: Endless
-/// Battle Clause) and `mirror` (Mirror Move against Mirror Move, with residual damage) were
-/// added for mutants the others could not reach. `speedtie`, `endless` and `freeze` build their
-/// teams specially.
-pub const SCENARIOS: [(&str, &[&str], &[&str]); 15] = [
-    ("freeze", &["icebeam", "blizzard", "icepunch", "aurorabeam", "recover", "softboiled", "splash"], &["icebeam", "blizzard", "icepunch", "aurorabeam", "recover", "softboiled", "splash"]),
+/// Targeted scenarios: (name, move pool of one side, move pool of the other). 13 are ported from
+/// the simulator audit's generator; `freeze` (both last Pokémon frozen: Endless Battle Clause),
+/// `mirror` (Mirror Move against Mirror Move, with residual damage) and `overkill` (level-100
+/// attackers against low-level Substitute users: the 997 damage cap shows in the uncapped
+/// `lastDamage` of a Substitute hit) were added for mutants the others could not reach.
+/// `speedtie`, `endless`, `freeze` and `overkill` build their teams specially.
+pub const SCENARIOS: [(&str, &[&str], &[&str]); 16] = [
+    ("overkill", &["explosion", "selfdestruct", "hyperbeam", "doubleedge", "bodyslam", "slash", "earthquake", "counter", "bide"], &["substitute", "recover", "softboiled", "splash", "counter", "bide"]),
+    ("freeze", &["icebeam", "blizzard", "icepunch"], &["splash", "teleport", "agility", "harden"]),
     ("mirror", &["mirrormove", "toxic", "leechseed", "bodyslam", "wrap", "hyperbeam"], &["mirrormove", "toxic", "leechseed", "psychic", "thrash", "metronome"]),
     ("bide", &["bide", "disable", "substitute", "counter", "metronome"], &["bide", "dig", "fly", "hyperbeam", "seismictoss", "wrap", "splash"]),
     ("boosts", &["amnesia", "swordsdance", "agility", "growth", "sharpen", "barrier", "acidarmor", "minimize", "doubleteam", "thunderwave", "haze", "psychic"], &["glare", "thunderwave", "ember", "screech", "growl", "leer", "stringshot", "sandattack", "smokescreen", "haze", "focusenergy"]),
@@ -197,6 +199,43 @@ fn scenario_mon(rng: &mut Rng, pool: &[&str], species: Option<&str>, level: Opti
     MonSpec { species, level, moves, ivs, evs }
 }
 
+/// `--teams thaw`: freeze-and-thaw battles (the audit's thaw corpus). Both sides draw from one
+/// pool of Ice moves, Fire moves (which thaw a frozen target) and stalling moves, so the side that
+/// freezes is often the one that thaws; teams are 1v1, 2v1 or 1v2 so battles last.
+pub fn thaw_teams(rng: &mut Rng) -> (Vec<MonSpec>, Vec<MonSpec>) {
+    const ICE: [&str; 3] = ["icebeam", "blizzard", "icepunch"];
+    const FIRE: [&str; 4] = ["fireblast", "flamethrower", "firepunch", "ember"];
+    const STALL: [&str; 8] = ["splash", "recover", "teleport", "substitute", "rest", "haze", "softboiled", "firespin"];
+    const SPECIES: [&str; 15] = [
+        "Snorlax", "Starmie", "Tauros", "Chansey", "Dewgong", "Mew", "Lapras", "Articuno", "Slowbro", "Jynx", "Gengar",
+        "Rhydon", "Cloyster", "Exeggutor", "Golem",
+    ];
+    let (n1, n2) = match rng.below(100) {
+        0..=47 => (1, 1),
+        48..=73 => (2, 1),
+        _ => (1, 2),
+    };
+    // Every Pokémon can freeze (one Ice move) and thaw (one Fire move with a burn chance); the
+    // rest is stalling so that frozen Pokémon stay in long enough to be thawed.
+    let mon = |rng: &mut Rng| {
+        let sp = pick(rng, &SPECIES);
+        let level = if rng.below(100) < 61 { 100 } else { 10 + rng.below(40) as u8 };
+        let mut m = scenario_mon(rng, &STALL, Some(sp), Some(level));
+        let id = |name: &str| sim_data::gen1_move_id(name).expect("thaw move");
+        // Two distinct stall moves (healing keeps frozen Pokémon in), then Ice and Fire.
+        let mut stall: Vec<&str> = STALL.to_vec();
+        let s1 = stall.swap_remove(rng.below(stall.len() as u64) as usize);
+        let s2 = stall.swap_remove(rng.below(stall.len() as u64) as usize);
+        m.moves = [id(pick(rng, &ICE)), id(pick(rng, &FIRE)), id(s1), id(s2)];
+        m.ivs = [30; 6];
+        m.evs = [255; 6];
+        m
+    };
+    let p1 = (0..n1).map(|_| mon(rng)).collect();
+    let p2 = (0..n2).map(|_| mon(rng)).collect();
+    (p1, p2)
+}
+
 /// Both teams of a targeted battle for scenario `s` (index into [`SCENARIOS`]).
 pub fn scenario_teams(rng: &mut Rng, s: usize) -> (Vec<MonSpec>, Vec<MonSpec>) {
     let (name, a, b) = SCENARIOS[s];
@@ -213,23 +252,34 @@ pub fn scenario_teams(rng: &mut Rng, s: usize) -> (Vec<MonSpec>, Vec<MonSpec>) {
             }
             (p1, p2)
         }
-        "freeze" => {
-            // Bulky non-Ice species (Ice types cannot be frozen by Ice moves), 1-2 per side.
-            const BULKY: [&str; 9] = ["Chansey", "Snorlax", "Slowbro", "Tauros", "Starmie", "Alakazam", "Exeggutor", "Golem", "Rhydon"];
-            let (n1, n2) = (1 + rng.below(2) as usize, 1 + rng.below(2) as usize);
-            let p1 = (0..n1)
-                .map(|_| {
-                    let sp = pick(rng, &BULKY);
-                    scenario_mon(rng, a, Some(sp), None)
-                })
-                .collect();
+        "overkill" => {
+            let p1 = (0..n1).map(|_| scenario_mon(rng, a, None, Some(100))).collect();
             let p2 = (0..n2)
                 .map(|_| {
-                    let sp = pick(rng, &BULKY);
-                    scenario_mon(rng, b, Some(sp), None)
+                    let lvl = 1 + rng.below(15) as u8;
+                    scenario_mon(rng, b, None, Some(lvl))
                 })
                 .collect();
             (p1, p2)
+        }
+        "freeze" => {
+            // The Endless Battle Clause with a frozen side: a frozen Pokémon cannot freeze back, so
+            // both sides frozen is (nearly) unreachable; instead one side is a level-100 Ghost with
+            // only harmless moves, the other a weak Pokémon with one Ice move. Once the Ghost is
+            // frozen and the attacker has spent its PP (Struggle cannot touch a Ghost), the
+            // clause ends the battle: "all frozen" against "no PP vs all Ghosts".
+            let ghost_species = pick(rng, &["Gengar", "Haunter", "Gastly"]);
+            let ghost = scenario_mon(rng, b, Some(ghost_species), Some(100));
+            let ice = sim_data::gen1_move_id(pick(rng, a)).unwrap();
+            let attacker_species = pick(rng, &["Starmie", "Tauros", "Slowbro", "Exeggutor", "Golem"]);
+            let level = 5 + rng.below(25) as u8;
+            let mut attacker = scenario_mon(rng, a, Some(attacker_species), Some(level));
+            attacker.moves = [ice, 0, 0, 0];
+            if rng.below(2) == 0 {
+                (vec![ghost], vec![attacker])
+            } else {
+                (vec![attacker], vec![ghost])
+            }
         }
         "endless" => {
             let p1 = (0..n1)
@@ -325,14 +375,11 @@ pub fn random_team(rng: &mut Rng, kind: TeamKind) -> Vec<MonSpec> {
 pub fn random_spec(id: String, rng: &mut Rng, kind: TeamKind, format: &str, patch: &str, prng: &str) -> Spec {
     // Targeted battles carry their scenario in the id (e.g. `s1-17-copy`) for the reports.
     let (id, (p1, p2)) = match kind {
-        TeamKind::Targeted | TeamKind::Thaw => {
-            let s = if kind == TeamKind::Thaw {
-                SCENARIOS.iter().position(|s| s.0 == "thaw").unwrap()
-            } else {
-                rng.below(SCENARIOS.len() as u64) as usize
-            };
+        TeamKind::Targeted => {
+            let s = rng.below(SCENARIOS.len() as u64) as usize;
             (format!("{id}-{}", SCENARIOS[s].0), scenario_teams(rng, s))
         }
+        TeamKind::Thaw => (id, thaw_teams(rng)),
         _ => (id, (random_team(rng, kind), random_team(rng, kind))),
     };
     let sodium = match prng {
