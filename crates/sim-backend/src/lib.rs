@@ -142,13 +142,13 @@ pub fn view(b: &Battle) -> View {
                 max_hp: m.stats[0],
                 status: stat,
                 sleep_turns: if m.status == st::SLP { m.slp_time.max(0) as u8 } else { 0 },
-                rest: m.status == st::SLP && m.status_self,
+                rest: m.status == st::SLP && m.status_self(),
                 stats: [m.stats[0], m.stats[1], m.stats[2], m.stats[5], m.stats[3]],
                 ..Default::default()
             };
             for k in 0..m.n_moves as usize {
                 mv.moves[k] = m.moves[k].id;
-                mv.pp[k] = m.moves[k].pp;
+                mv.pp[k] = m.moves[k].pp();
             }
             sv.mons[i] = mv;
         }
@@ -204,7 +204,7 @@ pub fn view(b: &Battle) -> View {
         for k in 0..a.n_slots as usize {
             let s = sd.slot(k);
             act.moves[k] = s.id;
-            act.pp[k] = s.pp;
+            act.pp[k] = s.pp();
         }
         sv.active = act;
     }

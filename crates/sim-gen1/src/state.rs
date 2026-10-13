@@ -100,76 +100,199 @@ pub fn move_id_str(id: u8) -> &'static str {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// A move slot: move id, PP (0..=63, Gen 1 wraps at 64) and the `disabled` flag, in 2 bytes.
+///
+/// `maxpp` is not stored: nothing in Gen 1 reads it, and it is a function of the move and the
+/// slot index ([`Side::slot_maxpp`]).
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct MoveSlot {
     pub id: u8,
-    pub pp: u8,
-    pub maxpp: u8,
-    pub disabled: bool,
+    /// PP in bits 0..=5, `disabled` in bit 7 (bit 6 is always clear).
+    bits: u8,
 }
 
-/// A team member (Showdown `Pokemon`, bench-persistent parts).
+impl MoveSlot {
+    const DISABLED: u8 = 0x80;
+    const PP: u8 = 0x3F;
+
+    #[inline(always)]
+    pub const fn new(id: u8, pp: u8) -> MoveSlot {
+        MoveSlot { id, bits: pp & Self::PP }
+    }
+
+    #[inline(always)]
+    pub const fn pp(&self) -> u8 {
+        self.bits & Self::PP
+    }
+
+    #[inline(always)]
+    pub fn set_pp(&mut self, pp: u8) {
+        self.bits = (self.bits & Self::DISABLED) | (pp & Self::PP);
+    }
+
+    #[inline(always)]
+    pub const fn disabled(&self) -> bool {
+        self.bits & Self::DISABLED != 0
+    }
+
+    #[inline(always)]
+    pub fn set_disabled(&mut self, on: bool) {
+        if on {
+            self.bits |= Self::DISABLED;
+        } else {
+            self.bits &= !Self::DISABLED;
+        }
+    }
+
+    /// The packed byte (serialisation).
+    #[inline]
+    pub const fn bits(&self) -> u8 {
+        self.bits
+    }
+
+    /// From the packed byte; `None` if the unused bit 6 is set.
+    #[inline]
+    pub const fn from_bits(id: u8, bits: u8) -> Option<MoveSlot> {
+        if bits & 0x40 != 0 {
+            None
+        } else {
+            Some(MoveSlot { id, bits })
+        }
+    }
+}
+
+impl std::fmt::Debug for MoveSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MoveSlot").field("id", &self.id).field("pp", &self.pp()).field("disabled", &self.disabled()).finish()
+    }
+}
+
+/// Getter/setter pairs for single-bit flags packed into an integer field.
+macro_rules! flags {
+    ($field:ident: $($(#[$doc:meta])* $get:ident / $set:ident = $bit:expr;)*) => {
+        $(
+            $(#[$doc])*
+            #[inline(always)]
+            pub const fn $get(&self) -> bool {
+                self.$field & $bit != 0
+            }
+            #[inline(always)]
+            pub fn $set(&mut self, on: bool) {
+                if on {
+                    self.$field |= $bit;
+                } else {
+                    self.$field &= !$bit;
+                }
+            }
+        )*
+    };
+}
+
+/// [`Mon::flags`] bits.
+pub mod mf {
+    pub const STATUS_SELF: u16 = 1 << 0;
+    pub const FAINTED: u16 = 1 << 1;
+    pub const FAINT_QUEUED: u16 = 1 << 2;
+    pub const SUB_FAINTED: u16 = 1 << 3;
+    pub const TRAPPED: u16 = 1 << 4;
+    pub const MAYBE_LOCKED: u16 = 1 << 5;
+    pub const MAYBE_DISABLED: u16 = 1 << 6;
+    pub const BENCH_PAR: u16 = 1 << 7;
+    pub const BENCH_BRN: u16 = 1 << 8;
+    pub const ALL: u16 = (1 << 9) - 1;
+}
+
+/// A team member (Showdown `Pokemon`, bench-persistent parts), 32 bytes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Mon {
     pub species: u8,
     pub level: u8,
-    /// Showdown IVs (DV * 2) and EVs per stat `[hp, atk, def, spa, spd, spe]`; kept for
-    /// Transform, which recomputes stats from the user's set and the target's species.
-    pub ivs: [u8; 6],
-    pub evs: [u8; 6],
+    pub hp: u16,
     /// `baseStoredStats` `[hp, atk, def, spa, spd, spe]` (index 0 = max HP).
     pub stats: [u16; 6],
-    pub hp: u16,
     pub status: u8,
     /// Sleep `statusState.time` / `startTime`.
     pub slp_time: i8,
     pub slp_start: u8,
-    /// `statusState.source` was an ally (self-inflicted, e.g. Rest): ignored by Sleep Clause.
-    pub status_self: bool,
+    pub n_moves: u8,
     /// `baseMoveSlots`.
     pub moves: [MoveSlot; 4],
-    pub n_moves: u8,
-    /// Showdown's `pokemon.speed` (the cached sort key, not a stat).
-    pub speed: u16,
-    pub fainted: bool,
-    pub faint_queued: bool,
-    /// `subFainted`.
-    pub sub_fainted: bool,
-    /// Modified stats `[atk, def, spa, spd, spe]` as left by the last `clearVolatile`.
-    pub modified: [u16; 5],
-    /// `trapped`, `maybeLocked`, `maybeDisabled`: Pokémon fields that `clearVolatile` does not
-    /// reset (endTurn does, for the actives), so a fainted active keeps them.
-    pub trapped: bool,
-    pub maybe_locked: bool,
-    pub maybe_disabled: bool,
+    /// [`mf`] bits; see the accessors.
+    pub flags: u16,
+    /// The Speed DV (IV / 2) and Speed EV of the set: Transform recomputes Speed from the user's
+    /// set and the target's species. (The other stats need only their computed values.)
+    pub spe_dv: u8,
+    pub spe_ev: u8,
 }
 
+impl Mon {
+    flags! { flags:
+        /// `statusState.source` was an ally (self-inflicted, e.g. Rest): ignored by Sleep Clause.
+        status_self / set_status_self = mf::STATUS_SELF;
+        fainted / set_fainted = mf::FAINTED;
+        faint_queued / set_faint_queued = mf::FAINT_QUEUED;
+        /// `subFainted`.
+        sub_fainted / set_sub_fainted = mf::SUB_FAINTED;
+        /// `trapped`, `maybeLocked`, `maybeDisabled`: Pokémon fields that `clearVolatile` does
+        /// not reset (endTurn does, for the actives), so a fainted active keeps them.
+        trapped / set_trapped = mf::TRAPPED;
+        maybe_locked / set_maybe_locked = mf::MAYBE_LOCKED;
+        maybe_disabled / set_maybe_disabled = mf::MAYBE_DISABLED;
+        /// The last `clearVolatile` re-applied the paralysis Speed drop / burn Attack drop to
+        /// the modified stats the Pokémon keeps on the bench.
+        bench_par / set_bench_par = mf::BENCH_PAR;
+        bench_brn / set_bench_brn = mf::BENCH_BRN;
+    }
+
+    /// Modified stats `[atk, def, spa, spd, spe]` as left by the last `clearVolatile` (the
+    /// stats, with the paralysis/burn drops it re-applied).
+    #[inline]
+    pub fn bench_modified(&self) -> [u16; 5] {
+        let mut m = [self.stats[1], self.stats[2], self.stats[3], self.stats[4], self.stats[5]];
+        if self.bench_par() {
+            m[4] = crate::battle::modify_stat(m[4], 0.25);
+        }
+        if self.bench_brn() {
+            m[0] = crate::battle::modify_stat(m[0], 0.5);
+        }
+        m
+    }
+}
+
+/// [`Active::virt`] / per-slot helpers.
+pub const VIRT_ALL: u8 = 0xF;
+
 /// Volatile state of the active Pokémon (reset by `clearVolatile`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Active {
     pub species: u8,
     pub types: [u8; 2],
+    /// `moveSlots`: for slots whose bit in `virt` is clear the slot *is* the base move slot
+    /// (Showdown shares the object), otherwise `vslots[i]` holds a Mimic/Transform copy.
+    pub n_slots: u8,
+    pub virt: u8,
+    pub transformed: bool,
+    pub switch_flag: bool,
+    pub pt_maybe_locked: bool,
+    /// `[atk, def, spa, spd, spe, accuracy, evasion]`.
+    pub boosts: [i8; 7],
+    /// Showdown's `pokemon.speed` of the active Pokémon (the cached sort key, not a stat). Every
+    /// benched Pokémon's is its Speed stat (set by `clearVolatile`), so only the active's is
+    /// stored.
+    pub speed: u16,
     /// `storedStats` `[atk, def, spa, spd, spe]` (Transform replaces them).
     pub stored: [u16; 5],
     /// `modifiedStats` `[atk, def, spa, spd, spe]`.
     pub modified: [u16; 5],
-    /// `[atk, def, spa, spd, spe, accuracy, evasion]`.
-    pub boosts: [i8; 7],
-    pub transformed: bool,
-    /// `moveSlots`: for slots with `virt[i] == false` the slot *is* the base move slot (Showdown
-    /// shares the object), otherwise `vslots[i]` holds a Mimic/Transform copy.
-    pub n_slots: u8,
-    pub virt: [bool; 4],
     pub vslots: [MoveSlot; 4],
     /// Volatile bitset (`1 << v::*`) and insertion stamps (Showdown iterates `volatiles` in
     /// insertion order, which decides how tied handlers are shuffled).
     pub vols: u32,
-    pub vstamp: [u16; v::COUNT],
-    pub next_stamp: u16,
+    pub vstamp: [u8; v::COUNT],
+    pub next_stamp: u8,
     pub confusion_time: i8,
     pub flinch_dur: u8,
     pub pt_dur: u8,
-    pub pt_maybe_locked: bool,
     /// `partiallytrapped.source`: the trapper's original team slot (on the foe side).
     pub pt_source: u8,
     pub fpt_dur: u8,
@@ -178,71 +301,25 @@ pub struct Active {
     pub ptl_dur: u8,
     pub ptl_total: u8,
     pub ptl_move: u8,
-    pub ptl_damage: u32,
     /// `partialtrappinglock.locked`: original team slot of the trapped foe.
     pub ptl_locked: u8,
     pub lockedmove_move: u8,
     pub lockedmove_time: i8,
-    pub lockedmove_acc: i32,
+    /// `lockedmove.accuracy` / `rage.accuracy` (0..=255).
+    pub lockedmove_acc: u8,
+    pub rage_acc: u8,
     pub twoturn_move: u8,
-    pub bide_damage: u32,
     pub bide_time: i8,
     pub disable_move: u8,
     pub disable_slot: u8,
     pub disable_time: i8,
-    pub sub_hp: i32,
-    pub rage_acc: i32,
     pub residual_counter: u8,
     /// `pokemon.lastMove` (0 = null).
     pub last_move: u8,
     pub move_this_turn: u8,
-    pub switch_flag: bool,
-}
-
-impl Default for Active {
-    fn default() -> Self {
-        Active {
-            species: 0,
-            types: [0; 2],
-            stored: [0; 5],
-            modified: [0; 5],
-            boosts: [0; 7],
-            transformed: false,
-            n_slots: 0,
-            virt: [false; 4],
-            vslots: [MoveSlot::default(); 4],
-            vols: 0,
-            vstamp: [0; v::COUNT],
-            next_stamp: 0,
-            confusion_time: 0,
-            flinch_dur: 0,
-            pt_dur: 0,
-            pt_maybe_locked: false,
-            pt_source: 0,
-            fpt_dur: 0,
-            fpt_counterpart: 0,
-            ptl_dur: 0,
-            ptl_total: 0,
-            ptl_move: 0,
-            ptl_damage: 0,
-            ptl_locked: 0,
-            lockedmove_move: 0,
-            lockedmove_time: 0,
-            lockedmove_acc: 0,
-            twoturn_move: 0,
-            bide_damage: 0,
-            bide_time: 0,
-            disable_move: 0,
-            disable_slot: 0,
-            disable_time: 0,
-            sub_hp: 0,
-            rage_acc: 0,
-            residual_counter: 0,
-            last_move: 0,
-            move_this_turn: 0,
-            switch_flag: false,
-        }
-    }
+    pub ptl_damage: u32,
+    pub bide_damage: u32,
+    pub sub_hp: i32,
 }
 
 impl Active {
@@ -250,15 +327,30 @@ impl Active {
     pub fn has(&self, id: u8) -> bool {
         self.vols & (1 << id) != 0
     }
+
+    /// Whether move slot `i` is a Mimic/Transform copy.
+    #[inline(always)]
+    pub fn is_virt(&self, i: usize) -> bool {
+        self.virt & (1 << i) != 0
+    }
+
+    #[inline(always)]
+    pub fn set_virt(&mut self, i: usize, on: bool) {
+        if on {
+            self.virt |= 1 << i;
+        } else {
+            self.virt &= !(1 << i);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Side {
     pub mons: [Mon; MAX_TEAM],
+    pub active: Active,
     pub n: u8,
     /// Showdown `side.pokemon` order: position -> original team slot.
     pub order: [u8; MAX_TEAM],
-    pub active: Active,
     pub left: u8,
     pub last_selected_move: u8,
     pub last_enemy_selected_move: u8,
@@ -291,7 +383,7 @@ impl Side {
     /// The active Pokémon's `moveSlots[i]`.
     #[inline]
     pub fn slot(&self, i: usize) -> MoveSlot {
-        if self.active.virt[i] {
+        if self.active.is_virt(i) {
             self.active.vslots[i]
         } else {
             self.mon().moves[i]
@@ -300,11 +392,29 @@ impl Side {
 
     #[inline]
     pub fn slot_mut(&mut self, i: usize) -> &mut MoveSlot {
-        if self.active.virt[i] {
+        if self.active.is_virt(i) {
             &mut self.active.vslots[i]
         } else {
             let a = self.order[0] as usize;
             &mut self.mons[a].moves[i]
+        }
+    }
+
+    /// Showdown's `maxpp` of the active's `moveSlots[i]`: base slots get 3 PP Ups; a Mimic or
+    /// Transform copy keeps them only in a slot the Pokémon's own set fills.
+    pub fn slot_maxpp(&self, i: usize) -> u8 {
+        let id = self.slot(i).id;
+        let ups = if i < self.mon().n_moves as usize { 3 } else { 0 };
+        crate::battle::calc_pp(sim_data::gen1::MOVES[id as usize].pp, ups)
+    }
+
+    /// Showdown's `speed` of team member `i` (only the active's differs from its Speed stat).
+    #[inline]
+    pub fn mon_speed(&self, i: usize) -> u16 {
+        if i == self.active_slot() && self.active.species != 0 {
+            self.active.speed
+        } else {
+            self.mons[i].stats[5]
         }
     }
 }

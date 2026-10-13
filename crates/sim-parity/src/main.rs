@@ -14,6 +14,7 @@
 //! ```
 //! See docs/SIM_DESIGN.md ("Parity harness").
 
+#[allow(dead_code)]
 mod bench;
 mod replay;
 mod runner;

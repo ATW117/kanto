@@ -110,6 +110,17 @@ pub fn calc_stats(base: [u8; 6], ivs: [u8; 6], evs: [u8; 6], level: u8) -> [u16;
     out
 }
 
+/// One stat of [`calc_stats`] (`hp` selects the HP formula).
+#[inline]
+pub fn calc_stat(base: u8, iv: u8, ev: u8, level: u8, hp: bool) -> u16 {
+    let core = 2 * base as u32 + (iv & 30) as u32 + ev as u32 / 4;
+    if hp {
+        ((core + 100) * level as u32 / 100 + 10) as u16
+    } else {
+        (core * level as u32 / 100 + 5) as u16
+    }
+}
+
 /// `calculatePP(move, ppUps)` for Gen 1-2.
 pub fn calc_pp(pp: u8, pp_ups: u8) -> u8 {
     let mut v = pp as u32 * (5 + pp_ups as u32) / 5;
@@ -230,7 +241,7 @@ impl Battle {
             return false;
         }
         let sd = &self.sides[p];
-        let bench_ok = |k: u8| (2..=sd.n).contains(&k) && !sd.mons[sd.order[k as usize - 1] as usize].fainted;
+        let bench_ok = |k: u8| (2..=sd.n).contains(&k) && !sd.mons[sd.order[k as usize - 1] as usize].fainted();
         match sd.request {
             Request::Move => {
                 let (moves, n, trapped) = self.request_moves(p);
@@ -347,7 +358,7 @@ impl Battle {
                 // slots, so `move k` is slot k - 1.
                 assert!(k >= 1 && k <= self.sides[p].active.n_slots, "player {p}: no move {k}");
                 let slot = self.sides[p].slot(k as usize - 1);
-                assert!(!slot.disabled, "player {p}: move {k} is disabled");
+                assert!(!slot.disabled(), "player {p}: move {k} is disabled");
                 Chosen::Move { id: slot.id, slot: k - 1 }
             }
             Choice::Pass => panic!("player {p} must choose (move request)"),
@@ -477,7 +488,7 @@ impl Battle {
         match a.kind {
             ActionKind::Move => {
                 // (Showdown also skips actions with a negative speed; Gen 1 speeds are positive.)
-                if self.sides[p].mon().fainted {
+                if self.sides[p].mon().fainted() {
                     return;
                 }
                 self.run_move(p, a.data, s);
@@ -528,21 +539,22 @@ impl Battle {
         if sd.left == 0 {
             return 0;
         }
-        (1..sd.n as usize).filter(|&i| !sd.mons[sd.order[i] as usize].fainted).count()
+        (1..sd.n as usize).filter(|&i| !sd.mons[sd.order[i] as usize].fainted()).count()
     }
 
     /// `Battle#eachEvent` for events without Gen 1 handlers (Update, BeforeTurn): only the
     /// speed sort of the active Pokémon matters, as a tie consumes a PRNG call.
     pub(crate) fn each_event(&mut self, label: &'static str) {
-        if self.rules.compat == Compat::Pkmn {
+        // Only a tie between the two actives consumes the PRNG: different speeds (the common
+        // case) need no further checks.
+        if self.rules.compat == Compat::Pkmn || self.sides[0].active.speed != self.sides[1].active.speed {
             return;
         }
         let mut actives = [0u16; 2];
         let mut n = 0;
         for p in 0..2 {
-            let m = self.sides[p].mon();
-            if self.started_side(p) && !m.fainted {
-                actives[n] = m.speed;
+            if self.started_side(p) && !self.sides[p].mon().fainted() {
+                actives[n] = self.sides[p].active.speed;
                 n += 1;
             }
         }
@@ -560,7 +572,7 @@ impl Battle {
     /// `Battle#updateSpeed`: refresh the cached `speed` of every non-fainted active.
     pub(crate) fn update_speed(&mut self) {
         for p in 0..2 {
-            if self.started_side(p) && !self.sides[p].mon().fainted {
+            if self.started_side(p) && !self.sides[p].mon().fainted() {
                 self.update_speed_one(p);
             }
         }
@@ -568,8 +580,8 @@ impl Battle {
 
     #[inline]
     pub(crate) fn update_speed_one(&mut self, p: Player) {
-        let spe = self.sides[p].active.modified[4];
-        self.sides[p].mon_mut().speed = spe;
+        let a = &mut self.sides[p].active;
+        a.speed = a.modified[4];
     }
 
     // ---- Switching -------------------------------------------------------------------------
@@ -586,7 +598,7 @@ impl Battle {
                 self.cancel_action(p);
                 self.clear_volatile(p, true);
             }
-            if self.sides[p].mons[out].fainted {
+            if self.sides[p].mons[out].fainted() {
                 self.sides[p].mons[out].status = st::NONE;
             }
         }
@@ -623,13 +635,14 @@ impl Battle {
     /// Pokémon's last `clearVolatile` left: base species/types/moves, unboosted modified stats).
     fn init_active(&mut self, p: Player) {
         let sd = &mut self.sides[p];
-        let m = sd.mons[sd.order[0] as usize];
+        let m = &sd.mons[sd.order[0] as usize];
         let sp = &SPECIES[m.species as usize];
         sd.active = Active {
             species: m.species,
             types: sp.types,
             stored: [m.stats[1], m.stats[2], m.stats[3], m.stats[4], m.stats[5]],
-            modified: m.modified,
+            modified: m.bench_modified(),
+            speed: m.stats[5],
             n_slots: m.n_moves,
             ..Active::default()
         };
@@ -642,21 +655,16 @@ impl Battle {
         let sd = &mut self.sides[p];
         let i = sd.order[0] as usize;
         let m = &mut sd.mons[i];
-        let mut modified = [m.stats[1], m.stats[2], m.stats[3], m.stats[4], m.stats[5]];
-        if m.status == st::PAR {
-            modified[4] = modify_stat(modified[4], 0.25);
-        }
-        if m.status == st::BRN {
-            modified[0] = modify_stat(modified[0], 0.5);
-        }
-        m.modified = modified;
-        m.speed = m.stats[5];
+        m.set_bench_par(m.status == st::PAR);
+        m.set_bench_brn(m.status == st::BRN);
+        let modified = m.bench_modified();
         let sp = &SPECIES[m.species as usize];
         sd.active = Active {
             species: m.species,
             types: sp.types,
             stored: [m.stats[1], m.stats[2], m.stats[3], m.stats[4], m.stats[5]],
             modified,
+            speed: m.stats[5],
             n_slots: m.n_moves,
             ..Active::default()
         };
@@ -670,7 +678,7 @@ impl Battle {
         }
         // Gen <= 2: lastMove is reset for every active Pokémon.
         for side in self.sides.iter_mut() {
-            if side.active.species != 0 && !side.mon().fainted {
+            if side.active.species != 0 && !side.mon().fainted() {
                 side.active.last_move = 0;
             }
         }
@@ -694,7 +702,7 @@ impl Battle {
 
     /// `queue.willMove(pokemon)`.
     pub(crate) fn will_move(&self, p: Player) -> bool {
-        if self.sides[p].mon().fainted {
+        if self.sides[p].mon().fainted() {
             return false;
         }
         self.queue.as_slice().iter().any(|a| a.kind == ActionKind::Move && a.side as usize == p)
@@ -714,12 +722,12 @@ impl Battle {
     pub(crate) fn faint(&mut self, p: Player) {
         let slot = self.sides[p].active_slot();
         let m = &mut self.sides[p].mons[slot];
-        if m.fainted || m.faint_queued {
+        if m.fainted() || m.faint_queued() {
             return;
         }
         m.hp = 0;
         self.sides[p].active.switch_flag = false;
-        m.faint_queued = true;
+        m.set_faint_queued(true);
         self.faint_queue[self.n_faint as usize] = Faint { side: p as u8, slot: slot as u8 };
         self.n_faint += 1;
     }
@@ -738,7 +746,7 @@ impl Battle {
             let f = self.faint_queue[k];
             let p = f.side as usize;
             let slot = f.slot as usize;
-            if self.sides[p].mons[slot].fainted {
+            if self.sides[p].mons[slot].fainted() {
                 continue;
             }
             s.event(Event::Faint { player: p, slot: f.slot });
@@ -750,7 +758,7 @@ impl Battle {
             let switch_flag = self.sides[p].active.switch_flag;
             self.clear_volatile(p, false);
             self.sides[p].active.switch_flag = switch_flag;
-            self.sides[p].mons[slot].fainted = true;
+            self.sides[p].mons[slot].set_fainted(true);
             self.sides[p].fainted_this_turn = true;
             last = Some(f);
         }
@@ -790,7 +798,7 @@ impl Battle {
     /// `Battle#checkFainted`.
     fn check_fainted(&mut self) {
         for p in 0..2 {
-            if self.started_side(p) && self.sides[p].mon().fainted {
+            if self.started_side(p) && self.sides[p].mon().fainted() {
                 self.sides[p].mon_mut().status = st::FNT;
                 self.sides[p].active.switch_flag = true;
             }
@@ -810,7 +818,7 @@ impl Battle {
         self.turn += 1;
         // Gen 1 partial trapping ends when either Pokémon is gone.
         for p in 0..2 {
-            if !self.started_side(p) || self.sides[p].mon().fainted {
+            if !self.started_side(p) || self.sides[p].mon().fainted() {
                 continue;
             }
             let q = 1 - p;
@@ -849,16 +857,16 @@ impl Battle {
             }
             let sd = &mut self.sides[p];
             sd.active.move_this_turn = 0;
-            sd.mon_mut().maybe_disabled = false;
-            sd.mon_mut().maybe_locked = false;
+            sd.mon_mut().set_maybe_disabled(false);
+            sd.mon_mut().set_maybe_locked(false);
             for i in 0..sd.active.n_slots as usize {
-                sd.slot_mut(i).disabled = false;
+                sd.slot_mut(i).set_disabled(false);
             }
-            if !sd.mon().fainted {
+            if !sd.mon().fainted() {
                 self.disable_move_event(p);
             }
             let sd = &mut self.sides[p];
-            sd.mon_mut().trapped = false;
+            sd.mon_mut().set_trapped(false);
         }
         for sd in self.sides.iter_mut() {
             sd.fainted_this_turn = false;
@@ -890,17 +898,17 @@ impl Battle {
             let foe_all_ghosts = || {
                 (0..self.sides[q].n as usize).all(|i| {
                     let m = &self.sides[q].mons[i];
-                    m.fainted || self.mon_types(q, i).contains(&7)
+                    m.fainted() || self.mon_types(q, i).contains(&7)
                 })
             };
             let foe_all_transform = || {
                 (0..self.sides[q].n as usize).all(|i| {
-                    self.sides[q].mons[i].fainted || self.mon_move_ids(q, i).iter().all(|&m| m == data::mv::TRANSFORM)
+                    self.sides[q].mons[i].fainted() || self.mon_move_ids(q, i).iter().all(|&m| m == data::mv::TRANSFORM)
                 })
             };
             (0..self.sides[p].n as usize).all(|i| {
                 let m = &self.sides[p].mons[i];
-                m.fainted
+                m.fainted()
                     || m.status == st::FRZ
                     || (self.mon_move_ids(p, i).iter().all(|&mv| mv == data::mv::TRANSFORM) && foe_all_transform())
                     || (self.mon_move_pps(p, i).iter().all(|&pp| pp == 0) && foe_all_ghosts())
@@ -943,11 +951,11 @@ impl Battle {
         let mut out = ArrayVec4::default();
         if i == sd.active_slot() && sd.active.species != 0 {
             for k in 0..sd.active.n_slots as usize {
-                out.push(sd.slot(k).pp);
+                out.push(sd.slot(k).pp());
             }
         } else {
             for k in 0..sd.mons[i].n_moves as usize {
-                out.push(sd.mons[i].moves[k].pp);
+                out.push(sd.mons[i].moves[k].pp());
             }
         }
         out
@@ -962,7 +970,7 @@ impl Battle {
         if a.vols & LOCK_VOLS == 0 {
             return None;
         }
-        let mut best: Option<(u16, u8)> = None;
+        let mut best: Option<(u8, u8)> = None;
         for (vol, val) in [
             (v::MUSTRECHARGE, req::RECHARGE),
             (v::LOCKEDMOVE, a.lockedmove_move),
@@ -980,10 +988,10 @@ impl Battle {
     #[inline]
     pub(crate) fn semi_locked_move(&self, p: Player, restrict: bool) -> Option<u8> {
         let a = &self.sides[p].active;
-        if a.vols & SEMI_LOCK_VOLS == 0 || (restrict && self.sides[p].mon().maybe_locked) {
+        if a.vols & SEMI_LOCK_VOLS == 0 || (restrict && self.sides[p].mon().maybe_locked()) {
             return None;
         }
-        let mut best: Option<(u16, u8)> = None;
+        let mut best: Option<(u8, u8)> = None;
         for (vol, val) in [(v::PARTIALTRAPPINGLOCK, a.ptl_move), (v::BIDE, data::mv::BIDE)] {
             if a.has(vol) && best.is_none_or(|(st, _)| a.vstamp[vol as usize] < st) {
                 best = Some((a.vstamp[vol as usize], val));
@@ -997,7 +1005,7 @@ impl Battle {
         let sd = &self.sides[p];
         (0..sd.active.n_slots as usize).any(|i| {
             let s = sd.slot(i);
-            !s.disabled && s.pp > 0
+            !s.disabled() && s.pp() > 0
         })
     }
 
@@ -1009,11 +1017,11 @@ impl Battle {
         let hard = self.locked_move(p).is_some();
         let a = self.sides[p].mon_mut();
         if hard {
-            a.trapped = true;
-            a.maybe_disabled = false;
-            a.maybe_locked = false;
+            a.set_trapped(true);
+            a.set_maybe_disabled(false);
+            a.set_maybe_locked(false);
         } else {
-            a.maybe_locked = a.maybe_locked || a.maybe_disabled;
+            a.set_maybe_locked(a.maybe_locked() || a.maybe_disabled());
         }
     }
 
@@ -1024,7 +1032,7 @@ impl Battle {
         let hard = locked.is_some();
         let sd = &self.sides[p];
         if !hard {
-            locked = if sd.mon().maybe_locked { None } else { self.semi_locked_move(p, true) };
+            locked = if sd.mon().maybe_locked() { None } else { self.semi_locked_move(p, true) };
         }
         let mut moves = [ReqMove { id: 0, disabled: false }; 4];
         let mut n = 0;
@@ -1035,7 +1043,7 @@ impl Battle {
             let mut valid = false;
             for i in 0..sd.active.n_slots as usize {
                 let s = sd.slot(i);
-                let disabled = s.disabled || s.pp == 0;
+                let disabled = s.disabled() || s.pp() == 0;
                 valid |= !disabled;
                 moves[n] = ReqMove { id: s.id, disabled };
                 n += 1;
@@ -1045,14 +1053,14 @@ impl Battle {
             }
         }
         let status = sd.mon().status;
-        if locked.is_none() && (matches!(status, st::FRZ | st::SLP) || (sd.active.has(v::PARTIALLYTRAPPED) && !sd.mon().maybe_locked)) {
+        if locked.is_none() && (matches!(status, st::FRZ | st::SLP) || (sd.active.has(v::PARTIALLYTRAPPED) && !sd.mon().maybe_locked())) {
             moves[0] = ReqMove { id: req::FIGHT, disabled: false };
             n = 1;
         } else if n == 0 {
             moves[0] = ReqMove { id: pm::STRUGGLE, disabled: false };
             n = 1;
         }
-        (moves, n, hard || sd.mon().trapped)
+        (moves, n, hard || sd.mon().trapped())
     }
 
     /// Legal choices for `player`, as offered by Showdown's request.
@@ -1061,7 +1069,7 @@ impl Battle {
         let mut n = 0;
         let bench = |out: &mut [Choice], n: &mut usize| {
             for k in 2..=sd.n as usize {
-                if !sd.mons[sd.order[k - 1] as usize].fainted {
+                if !sd.mons[sd.order[k - 1] as usize].fainted() {
                     out[*n] = Choice::Switch(k as u8);
                     *n += 1;
                 }
@@ -1137,12 +1145,10 @@ impl Side {
             let mut m = Mon {
                 species: spec.species,
                 level: spec.level,
-                ivs: spec.ivs.map(|x| x & 30),
-                evs: spec.evs,
                 stats,
                 hp: stats[0],
-                modified: [stats[1], stats[2], stats[3], stats[4], stats[5]],
-                speed: stats[5],
+                spe_dv: (spec.ivs[5] & 30) / 2,
+                spe_ev: spec.evs[5],
                 ..Mon::default()
             };
             for (k, &id) in spec.moves.iter().enumerate() {
@@ -1150,7 +1156,7 @@ impl Side {
                     continue;
                 }
                 let pp = calc_pp(MOVES[id as usize].pp, 3);
-                m.moves[m.n_moves as usize] = MoveSlot { id, pp, maxpp: pp, disabled: false };
+                m.moves[m.n_moves as usize] = MoveSlot::new(id, pp);
                 m.n_moves += 1;
                 let _ = k;
             }

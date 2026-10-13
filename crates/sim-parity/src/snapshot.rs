@@ -25,18 +25,18 @@ fn side_snap(b: &Battle, p: usize) -> Value {
         let mut o = Map::new();
         o.insert("hp".into(), json!(m.hp));
         o.insert("status".into(), json!(st::IDS[m.status as usize]));
-        o.insert("fainted".into(), json!(m.fainted));
-        o.insert("speed".into(), json!(m.speed));
-        o.insert("pp".into(), json!(m.moves[..m.n_moves as usize].iter().map(|s| s.pp).collect::<Vec<_>>()));
-        o.insert("subFainted".into(), json!(m.sub_fainted));
+        o.insert("fainted".into(), json!(m.fainted()));
+        o.insert("speed".into(), json!(sd.mon_speed(i)));
+        o.insert("pp".into(), json!(m.moves[..m.n_moves as usize].iter().map(|s| s.pp()).collect::<Vec<_>>()));
+        o.insert("subFainted".into(), json!(m.sub_fainted()));
         if m.status == st::SLP {
             o.insert("slp".into(), json!([m.slp_time, m.slp_start]));
         }
         if (st::SLP..=st::TOX).contains(&m.status) {
-            o.insert("statusSelf".into(), json!(m.status_self));
+            o.insert("statusSelf".into(), json!(m.status_self()));
         }
         if i != sd.active_slot() {
-            o.insert("modified".into(), stat_obj(m.modified));
+            o.insert("modified".into(), stat_obj(m.bench_modified()));
         }
         team.push(Value::Object(o));
     }
@@ -53,7 +53,7 @@ fn side_snap(b: &Battle, p: usize) -> Value {
         let moves: Vec<Value> = (0..a.n_slots as usize)
             .map(|i| {
                 let s = sd.slot(i);
-                json!([move_id_str(s.id), s.pp, s.disabled, s.maxpp])
+                json!([move_id_str(s.id), s.pp(), s.disabled(), sd.slot_maxpp(i)])
             })
             .collect();
         let mut vols = Map::new();
@@ -76,8 +76,8 @@ fn side_snap(b: &Battle, p: usize) -> Value {
             "volOrder": vol_order,
             "lastMove": mid(a.last_move),
             "moveThisTurn": move_id_str(a.move_this_turn),
-            "trapped": sd.mon().trapped,
-            "maybeLocked": sd.mon().maybe_locked,
+            "trapped": sd.mon().trapped(),
+            "maybeLocked": sd.mon().maybe_locked(),
             "transformed": a.transformed,
         })
     };

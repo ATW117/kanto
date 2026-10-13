@@ -98,6 +98,36 @@ mod tests {
     #[test]
     fn battle_is_copy_and_small() {
         let size = std::mem::size_of::<Battle>();
-        assert!(size < 2048, "battle is {size} bytes");
+        assert!(size <= 1024, "battle is {size} bytes");
+        assert_eq!(std::mem::size_of::<state::Mon>(), 32);
+        assert_eq!(std::mem::size_of::<state::Action>(), 8);
+    }
+
+    /// Volatile iteration order equals insertion order (as a JS object's keys) across many
+    /// adds and deletes, including when the 8-bit insertion stamps are renumbered.
+    #[test]
+    fn volatile_insertion_order_survives_stamp_renumbering() {
+        let t = team();
+        let mut b = Battle::new(&t, &t, Prng::from_u64(1), Rules::OU).unwrap();
+        b.update(Choice::Pass, Choice::Pass, &mut ()).unwrap();
+        let mut model: Vec<u8> = Vec::new();
+        let mut r = 12345u64;
+        for step in 0..20_000 {
+            r = r.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let id = ((r >> 33) % state::v::COUNT as u64) as u8;
+            if model.contains(&id) {
+                b.del_vol(0, id);
+                model.retain(|&x| x != id);
+            } else {
+                b.set_vol(0, id);
+                model.push(id);
+            }
+            let got: Vec<u8> = b.vol_order(0).collect();
+            assert_eq!(got, model, "step {step}");
+            let mask = (r >> 7) as u32 & ((1 << state::v::COUNT) - 1);
+            let got: Vec<u8> = b.vols_in_order(0, mask).collect();
+            let want: Vec<u8> = model.iter().copied().filter(|&x| mask & (1 << x) != 0).collect();
+            assert_eq!(got, want, "step {step} mask {mask:#x}");
+        }
     }
 }

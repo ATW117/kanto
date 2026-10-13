@@ -205,17 +205,17 @@ fn illegal_choices_are_rejected() {
     assert_rejected(&b0, m, Choice::Switch(1), "p2 switch to self");
     let mut b = b0;
     b.sides[0].mons[1].hp = 0;
-    b.sides[0].mons[1].fainted = true;
-    b.sides[0].mons[1].faint_queued = true;
+    b.sides[0].mons[1].set_fainted(true);
+    b.sides[0].mons[1].set_faint_queued(true);
     b.sides[0].left -= 1;
     assert_rejected(&b, Choice::Switch(2), m, "switch to a fainted Pokémon");
     assert!(b.apply_choices(Choice::Switch(3), m, &mut ()).is_ok());
     let mut b = b0;
-    b.sides[0].mons[0].moves[1].pp = 0;
+    b.sides[0].mons[0].moves[1].set_pp(0);
     assert_rejected(&b, Choice::Move(2), m, "move with 0 PP");
     assert!(b.apply_choices(Choice::Move(1), m, &mut ()).is_ok());
     let mut b = b0;
-    b.sides[0].mons[0].moves[0].disabled = true;
+    b.sides[0].mons[0].moves[0].set_disabled(true);
     assert_rejected(&b, Choice::Move(1), m, "disabled move");
     // Every legal choice is accepted.
     let mut buf = [Choice::Pass; 16];

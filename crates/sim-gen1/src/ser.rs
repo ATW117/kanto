@@ -125,17 +125,23 @@ macro_rules! bin_struct {
     };
 }
 
-bin_struct!(MoveSlot { id, pp, maxpp, disabled });
-bin_struct!(Mon {
-    species, level, ivs, evs, stats, hp, status, slp_time, slp_start, status_self, moves, n_moves, speed, fainted,
-    faint_queued, sub_fainted, modified, trapped, maybe_locked, maybe_disabled,
-});
+impl Bin for MoveSlot {
+    fn put(&self, o: &mut Vec<u8>) {
+        o.push(self.id);
+        o.push(self.bits());
+    }
+    fn get(i: &mut &[u8]) -> Option<Self> {
+        let b = take(i, 2)?;
+        MoveSlot::from_bits(b[0], b[1])
+    }
+}
+bin_struct!(Mon { species, level, hp, stats, status, slp_time, slp_start, n_moves, moves, flags, spe_dv, spe_ev });
 bin_struct!(Active {
-    species, types, stored, modified, boosts, transformed, n_slots, virt, vslots, vols, vstamp, next_stamp,
-    confusion_time, flinch_dur, pt_dur, pt_maybe_locked, pt_source, fpt_dur, fpt_counterpart, ptl_dur, ptl_total,
-    ptl_move, ptl_damage, ptl_locked, lockedmove_move, lockedmove_time, lockedmove_acc, twoturn_move, bide_damage,
-    bide_time, disable_move, disable_slot, disable_time, sub_hp, rage_acc, residual_counter, last_move,
-    move_this_turn, switch_flag,
+    species, types, n_slots, virt, transformed, switch_flag, pt_maybe_locked, boosts, speed, stored, modified, vslots,
+    vols, vstamp, next_stamp, confusion_time, flinch_dur, pt_dur, pt_source, fpt_dur, fpt_counterpart, ptl_dur,
+    ptl_total, ptl_move, ptl_locked, lockedmove_move, lockedmove_time, lockedmove_acc, rage_acc, twoturn_move,
+    bide_time, disable_move, disable_slot, disable_time, residual_counter, last_move, move_this_turn, ptl_damage,
+    bide_damage, sub_hp,
 });
 bin_struct!(Side {
     mons, n, order, active, left, last_selected_move, last_enemy_selected_move, last_selected_move_slot, last_move,
@@ -218,7 +224,19 @@ fn selected_move(id: u8) -> bool {
 }
 
 fn valid_slot(s: &MoveSlot) -> bool {
-    real_move(s.id) && s.pp <= 63 && s.maxpp <= 64
+    // (PP is 6 bits by construction.)
+    real_move(s.id)
+}
+
+/// Whether `stat` is what Showdown computes for this base stat at `level` with some IV (even,
+/// 0..=30) and EV (0..=255): the state keeps the stats, not the set.
+fn attainable_stat(base: u8, level: u8, stat: u16, hp: bool) -> bool {
+    // The stat formula depends on IV + EV / 4, which takes every value in 0..=93; as a function
+    // of it the stat never decreases and steps by at most 1 (level <= 100), so the attainable
+    // stats are exactly the range between the extremes.
+    let lo = crate::battle::calc_stat(base, 0, 0, level, hp);
+    let hi = crate::battle::calc_stat(base, 30, 255, level, hp);
+    (lo..=hi).contains(&stat)
 }
 
 fn validate_side(b: &Battle, p: usize, sd: &Side) -> Result<(), String> {
@@ -247,9 +265,14 @@ fn validate_side(b: &Battle, p: usize, sd: &Side) -> Result<(), String> {
         }
         ensure!((1..=151).contains(&m.species), "mon {i}: species {}", m.species);
         ensure!((1..=100).contains(&m.level), "mon {i}: level {}", m.level);
-        ensure!(m.ivs.iter().all(|&iv| iv <= 30 && iv % 2 == 0), "mon {i}: ivs {:?}", m.ivs);
-        let stats = crate::battle::calc_stats(SPECIES[m.species as usize].base, m.ivs, m.evs, m.level);
-        ensure!(m.stats == stats, "mon {i}: stats {:?} do not match its set {:?}", m.stats, stats);
+        ensure!(m.spe_dv <= 15, "mon {i}: Speed DV {}", m.spe_dv);
+        let base = SPECIES[m.species as usize].base;
+        let spe = crate::battle::calc_stat(base[5], m.spe_dv * 2, m.spe_ev, m.level, false);
+        ensure!(m.stats[5] == spe, "mon {i}: Speed {} does not match its set ({spe})", m.stats[5]);
+        for k in 0..5 {
+            ensure!(attainable_stat(base[k], m.level, m.stats[k], k == 0), "mon {i}: stat {k} = {} is not attainable", m.stats[k]);
+        }
+        ensure!(m.flags & !mf::ALL == 0, "mon {i}: flags {:#x}", m.flags);
         ensure!(m.hp <= m.stats[0], "mon {i}: hp {} > max {}", m.hp, m.stats[0]);
         ensure!(m.status <= st::FNT, "mon {i}: status {}", m.status);
         ensure!((-8..=8).contains(&m.slp_time) && m.slp_start <= 8, "mon {i}: sleep counters");
@@ -262,10 +285,9 @@ fn validate_side(b: &Battle, p: usize, sd: &Side) -> Result<(), String> {
                 ensure!(*s == MoveSlot::default(), "mon {i}: empty move slot {k} is not zeroed");
             }
         }
-        ensure!(m.modified.iter().all(|&x| (1..=999).contains(&x)), "mon {i}: modified stats {:?}", m.modified);
-        ensure!(!m.fainted || m.hp == 0, "mon {i}: fainted with hp {}", m.hp);
-        ensure!(b.ended || m.faint_queued == m.fainted, "mon {i}: faint queued but not processed");
-        alive += !m.fainted as usize;
+        ensure!(!m.fainted() || m.hp == 0, "mon {i}: fainted with hp {}", m.hp);
+        ensure!(b.ended || m.faint_queued() == m.fainted(), "mon {i}: faint queued but not processed");
+        alive += !m.fainted() as usize;
     }
     ensure!(sd.left as usize == alive, "pokemonLeft {} but {alive} alive", sd.left);
     ensure!(selected_move(sd.last_selected_move), "lastSelectedMove {}", sd.last_selected_move);
@@ -299,11 +321,11 @@ fn validate_side(b: &Battle, p: usize, sd: &Side) -> Result<(), String> {
     ensure!(a.boosts.iter().all(|&x| (-6..=6).contains(&x)), "boosts {:?}", a.boosts);
     ensure!((1..=4).contains(&a.n_slots), "{} move slots", a.n_slots);
     for i in 0..4 {
-        let s = if a.virt[i] { a.vslots[i] } else { m.moves[i] };
+        let s = if a.is_virt(i) { a.vslots[i] } else { m.moves[i] };
         if i < a.n_slots as usize {
             ensure!(valid_slot(&s), "move slot {i} {s:?}");
         }
-        ensure!(a.vslots[i].id <= 165 && a.vslots[i].pp <= 63 && a.vslots[i].maxpp <= 64, "virtual slot {i}");
+        ensure!(a.vslots[i].id <= 165, "virtual slot {i}");
     }
     ensure!(a.vols < 1 << v::COUNT, "volatile bits {:#x}", a.vols);
     let small = |x: i8| (-8..=8).contains(&x);
@@ -322,9 +344,35 @@ fn validate_side(b: &Battle, p: usize, sd: &Side) -> Result<(), String> {
         ensure!(id <= 165, "{what} {id}");
     }
     ensure!(a.disable_slot <= 3, "disable slot {}", a.disable_slot);
-    ensure!((0..=255).contains(&a.lockedmove_acc) && (0..=255).contains(&a.rage_acc), "accuracy state");
+    ensure!(a.virt <= VIRT_ALL, "virtual slot bits {:#x}", a.virt);
     // A broken Substitute can leave a large negative value behind; only a live one is read.
     ensure!(a.sub_hp.unsigned_abs() < 1 << 30, "substitute hp {}", a.sub_hp);
     ensure!(!a.has(v::SUBSTITUTE) || (1..=1024).contains(&a.sub_hp), "substitute hp {}", a.sub_hp);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The O(1) attainability check equals a brute force over every IV and EV.
+    #[test]
+    fn attainable_stat_matches_brute_force() {
+        for base in (1..=255u8).step_by(7).chain([255]) {
+            for level in 1..=100u8 {
+                for hp in [false, true] {
+                    let mut seen = std::collections::BTreeSet::new();
+                    for dv in 0..=15u8 {
+                        for ev in 0..=255u8 {
+                            seen.insert(crate::battle::calc_stat(base, dv * 2, ev, level, hp));
+                        }
+                    }
+                    let (lo, hi) = (*seen.first().unwrap(), *seen.last().unwrap());
+                    for stat in lo.saturating_sub(2)..=hi + 2 {
+                        assert_eq!(attainable_stat(base, level, stat, hp), seen.contains(&stat), "base {base} level {level} stat {stat}");
+                    }
+                }
+            }
+        }
+    }
 }

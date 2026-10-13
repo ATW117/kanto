@@ -146,10 +146,10 @@ impl Battle {
             return;
         }
         let slot = sd.slot_mut(i);
-        slot.pp = (slot.pp as i32 - amount).rem_euclid(64) as u8;
-        let pp = slot.pp;
-        if sd.active.virt[i] && !sd.active.transformed && i < sd.mon().n_moves as usize {
-            sd.mon_mut().moves[i].pp = pp;
+        slot.set_pp((slot.pp() as i32 - amount).rem_euclid(64) as u8);
+        let pp = slot.pp();
+        if sd.active.is_virt(i) && !sd.active.transformed && i < sd.mon().n_moves as usize {
+            sd.mon_mut().moves[i].set_pp(pp);
         }
     }
 
@@ -172,7 +172,7 @@ impl Battle {
             return;
         }
         let target = self.target_of(p, id);
-        self.sides[target].mon_mut().sub_fainted = false;
+        self.sides[target].mon_mut().set_sub_fainted(false);
         if self.sides[p].active.move_this_turn != 0 || !self.before_move(p, target, id, s) {
             self.after_move_self(p, s);
             return;
@@ -199,7 +199,7 @@ impl Battle {
     fn before_move<S: Sink>(&mut self, p: Player, target: Player, id: u8, s: &mut S) -> bool {
         let mut list = [(0u64, 0u8); 8];
         let mut n = 0;
-        let speed = self.sides[p].mon().speed;
+        let speed = self.sides[p].active.speed;
         let key = |prio: i8, sub: u8| key(KEY_ORDER_UNSET, prio, speed, sub);
         match self.sides[p].mon().status {
             st::FRZ => {
@@ -364,8 +364,8 @@ impl Battle {
             let sd = &mut self.sides[p];
             let i = sd.last_selected_move_slot as usize;
             if sd.active.transformed && i < sd.mon().n_moves as usize {
-                let mm = sd.mon_mut();
-                mm.moves[i].pp = (mm.moves[i].pp + 1) % 64;
+                let slot = &mut sd.mon_mut().moves[i];
+                slot.set_pp((slot.pp() + 1) % 64);
             }
         }
         let side_id = if m.id == pm::NOMOVE_HACK { pm::NOMOVE_HACK } else { m.id };
@@ -390,7 +390,7 @@ impl Battle {
     }
 
     fn use_move_inner<S: Sink>(&mut self, p: Player, m: &mut Mv, target: Player, source_effect: Option<u8>, s: &mut S) {
-        if self.sides[p].mon().fainted {
+        if self.sides[p].mon().fainted() {
             return;
         }
         let slot = self.sides[p].order[0];
@@ -415,7 +415,7 @@ impl Battle {
             }
             _ => {}
         }
-        if self.sides[target].mon().fainted {
+        if self.sides[target].mon().fainted() {
             return;
         }
         if !SKIP_LASTDAMAGE.contains(&m.id) {
@@ -500,10 +500,10 @@ impl Battle {
             acc = acc.clamp(1, 255);
             let ua = &mut self.sides[p].active;
             if ua.has(v::LOCKEDMOVE) {
-                ua.lockedmove_acc = acc as i32;
+                ua.lockedmove_acc = acc as u8;
             }
             if ua.has(v::RAGE) {
-                ua.rage_acc = acc as i32;
+                ua.rage_acc = acc as u8;
             }
             acc_int = Some(acc);
         }
@@ -547,7 +547,7 @@ impl Battle {
                     if i == 0 {
                         m.fixed = Some(d);
                     }
-                    if self.sides[t].mon().sub_fainted {
+                    if self.sides[t].mon().sub_fainted() {
                         i += 1;
                         break;
                     }
@@ -561,7 +561,7 @@ impl Battle {
                 damage = self.move_hit(Some(t), p, m, Md::Main, false, false, s);
             }
         }
-        if m.d.selfdestruct && !self.sides[t].mon().sub_fainted {
+        if m.d.selfdestruct && !self.sides[t].mon().sub_fainted() {
             self.faint(p);
         }
         if damage == R::False {
@@ -627,7 +627,7 @@ impl Battle {
                 }
             }
             if let R::N(d) = damage {
-                if !self.sides[t].mon().fainted {
+                if !self.sides[t].mon().fainted() {
                     let dealt = self.damage(d, t, Some(p), Dmg::Move(m.real_id()));
                     if dealt > 0 {
                         self.apply_recoil(dealt, m.real_id(), p);
@@ -745,7 +745,7 @@ impl Battle {
         match m.id {
             mv::DISABLE => {
                 let sd = &self.sides[t];
-                if (0..sd.active.n_slots as usize).any(|i| sd.slot(i).pp > 0) {
+                if (0..sd.active.n_slots as usize).any(|i| sd.slot(i).pp() > 0) {
                     R::Undef
                 } else {
                     R::False
@@ -804,7 +804,7 @@ impl Battle {
         a.sub_hp -= if u as i64 > a.sub_hp as i64 { a.sub_hp } else { u as i32 };
         if a.sub_hp <= 0 {
             self.remove_volatile(t, v::SUBSTITUTE);
-            self.sides[t].mon_mut().sub_fainted = true;
+            self.sides[t].mon_mut().set_sub_fainted(true);
         }
         if self.sides[t].active.has(v::SUBSTITUTE) {
             if u > 0 {
@@ -1005,10 +1005,9 @@ impl Battle {
                 }
                 let sd = &mut self.sides[p];
                 let i = sd.last_selected_move_slot as usize;
-                let pp = sd.slot(i).pp;
-                let ups = if i < sd.mon().n_moves as usize { 3 } else { 0 };
-                sd.active.virt[i] = true;
-                sd.active.vslots[i] = MoveSlot { id, pp, maxpp: crate::battle::calc_pp(MOVES[id as usize].pp, ups), disabled: false };
+                let pp = sd.slot(i).pp();
+                sd.active.set_virt(i, true);
+                sd.active.vslots[i] = MoveSlot::new(id, pp);
                 s.event(Event::MimicStart { player: p, mv: id });
                 true
             }
@@ -1068,7 +1067,7 @@ impl Battle {
     /// Gen 1 Haze `onHit`.
     fn haze<S: Sink>(&mut self, source: Player, _s: &mut S) {
         for p in 0..2 {
-            if self.sides[p].active.species == 0 || self.sides[p].mon().fainted {
+            if self.sides[p].active.species == 0 || self.sides[p].mon().fainted() {
                 continue;
             }
             self.clear_boosts(p);
@@ -1094,18 +1093,19 @@ impl Battle {
 
     /// `Pokemon#transformInto` (Gen 1).
     fn transform<S: Sink>(&mut self, p: Player, t: Player, s: &mut S) -> bool {
-        if self.sides[t].mon().fainted {
+        if self.sides[t].mon().fainted() {
             return false;
         }
         let foe = self.sides[t].active;
         let foe_slots: [MoveSlot; 4] = std::array::from_fn(|i| if i < foe.n_slots as usize { self.sides[t].slot(i) } else { MoveSlot::default() });
-        // setSpecies(species, effect, isTransform): stats from the user's set and the new species.
+        // setSpecies(species, effect, isTransform): stats from the user's set and the new species
+        // (only Speed is kept: `speed`; the stored stats are the target's).
         let me = *self.sides[p].mon();
         let base = SPECIES[foe.species as usize].base;
-        let stats = crate::battle::calc_stats(base, me.ivs, me.evs, me.level);
+        let speed = crate::battle::calc_stat(base[5], me.spe_dv * 2, me.spe_ev, me.level, false);
         let sd = &mut self.sides[p];
-        sd.mon_mut().speed = stats[5];
         let a = &mut sd.active;
+        a.speed = speed;
         a.species = foe.species;
         a.transformed = true;
         a.types = foe.types;
@@ -1115,16 +1115,10 @@ impl Battle {
         for i in 0..4 {
             if i < foe.n_slots as usize {
                 let id = foe_slots[i].id;
-                let ups = if i < me.n_moves as usize { 3 } else { 0 };
-                a.virt[i] = true;
-                a.vslots[i] = MoveSlot {
-                    id,
-                    pp: MOVES[id as usize].pp.min(5),
-                    maxpp: crate::battle::calc_pp(MOVES[id as usize].pp, ups),
-                    disabled: false,
-                };
+                a.set_virt(i, true);
+                a.vslots[i] = MoveSlot::new(id, MOVES[id as usize].pp.min(5));
             } else {
-                a.virt[i] = false;
+                a.set_virt(i, false);
             }
         }
         a.boosts = foe.boosts;

@@ -34,9 +34,12 @@ impl Battle {
     #[inline]
     pub(crate) fn set_vol(&mut self, p: Player, id: u8) {
         let a = &mut self.sides[p].active;
+        if a.next_stamp == u8::MAX {
+            renumber_stamps(a);
+        }
         a.vols |= 1 << id;
         a.vstamp[id as usize] = a.next_stamp;
-        a.next_stamp = a.next_stamp.wrapping_add(1);
+        a.next_stamp += 1;
     }
 
     /// `delete pokemon.volatiles[id]` (no End event, no HP check).
@@ -73,7 +76,7 @@ impl Battle {
             };
         }
         // runStatusImmunity: only `fainted` matters for volatiles in Gen 1.
-        if self.sides[p].mon().fainted {
+        if self.sides[p].mon().fainted() {
             return Some(false);
         }
         self.set_vol(p, id);
@@ -133,7 +136,7 @@ impl Battle {
                 let mut cand = [0u8; 4];
                 let mut n = 0;
                 for i in 0..sd.active.n_slots as usize {
-                    if sd.slot(i).pp > 0 {
+                    if sd.slot(i).pp() > 0 {
                         cand[n] = i as u8;
                         n += 1;
                     }
@@ -177,7 +180,7 @@ impl Battle {
             return false;
         }
         if !ignore_immunities {
-            let immune = sd.mon().fainted || (matches!(status, st::PSN | st::TOX) && sd.active.types.contains(&data_type_poison()));
+            let immune = sd.mon().fainted() || (matches!(status, st::PSN | st::TOX) && sd.active.types.contains(&data_type_poison()));
             if immune {
                 if status_move {
                     s.event(Event::Immune);
@@ -191,7 +194,7 @@ impl Battle {
         let self_inflicted = source == p;
         let m = self.sides[p].mon_mut();
         m.status = status;
-        m.status_self = self_inflicted;
+        m.set_status_self(self_inflicted);
         m.slp_time = 0;
         m.slp_start = 0;
         match status {
@@ -229,7 +232,7 @@ impl Battle {
         if r.sleep_clause && status == st::SLP {
             for i in 0..sd.n as usize {
                 let m = &sd.mons[i];
-                if m.hp > 0 && m.status == st::SLP && !m.status_self {
+                if m.hp > 0 && m.status == st::SLP && !m.status_self() {
                     return false;
                 }
             }
@@ -253,7 +256,7 @@ impl Battle {
         m.status = st::NONE;
         m.slp_time = 0;
         m.slp_start = 0;
-        m.status_self = false;
+        m.set_status_self(false);
         true
     }
 
@@ -313,7 +316,7 @@ impl Battle {
                     self.sides[q].active.sub_hp -= d as i32;
                     if self.sides[q].active.sub_hp <= 0 {
                         self.remove_volatile(q, v::SUBSTITUTE);
-                        self.sides[q].mon_mut().sub_fainted = true;
+                        self.sides[q].mon_mut().set_sub_fainted(true);
                     }
                     return d;
                 }
@@ -444,7 +447,7 @@ impl Battle {
     /// Sort key for a handler on `p`'s active Pokémon.
     #[inline]
     fn hkey(&self, p: Player, priority: i8, sub: u8) -> u64 {
-        key(KEY_ORDER_UNSET, priority, self.sides[p].mon().speed, sub)
+        key(KEY_ORDER_UNSET, priority, self.sides[p].active.speed, sub)
     }
 
     /// `runEvent('DisableMove', pokemon)` at end of turn.
@@ -471,24 +474,24 @@ impl Battle {
         for &(_, h) in &list[..n] {
             let a = &self.sides[p].active;
             let (pt_maybe_locked, ptl_total, ptl_dur, disable_slot, n_slots) = (a.pt_maybe_locked, a.ptl_total, a.ptl_dur, a.disable_slot, a.n_slots);
-            let maybe_locked = &mut self.sides[p].mon_mut().maybe_locked;
+            let mon = self.sides[p].mon_mut();
             match h {
-                100 | v::BIDE => *maybe_locked = false,
+                100 | v::BIDE => mon.set_maybe_locked(false),
                 v::PARTIALLYTRAPPED => {
                     if pt_maybe_locked {
-                        *maybe_locked = true;
+                        mon.set_maybe_locked(true);
                     }
                 }
-                v::FAKEPARTIALLYTRAPPED => *maybe_locked = true,
+                v::FAKEPARTIALLYTRAPPED => mon.set_maybe_locked(true),
                 v::PARTIALTRAPPINGLOCK => {
                     if ptl_total as i32 - ptl_dur as i32 > 1 {
-                        *maybe_locked = true;
+                        mon.set_maybe_locked(true);
                     }
                 }
                 v::DISABLE => {
                     let slot = disable_slot as usize;
                     if (n_slots as usize) > slot {
-                        self.sides[p].slot_mut(slot).disabled = true;
+                        self.sides[p].slot_mut(slot).set_disabled(true);
                     }
                 }
                 _ => {}
@@ -516,7 +519,7 @@ impl Battle {
             ids[n] = id;
             n += 1;
         }
-        // Stamps increase with insertion (wrapping is irrelevant: < 256 adds per switch-in).
+        // Stamps increase with insertion ([`renumber_stamps`] keeps them below 255).
         if n > 1 {
             ids[..n].sort_by_key(|&id| a.vstamp[id as usize]);
         }
@@ -545,7 +548,7 @@ impl Battle {
         }
         for &(_, (p, id)) in &list[..n] {
             let p = p as usize;
-            if self.sides[p].mon().fainted || !self.sides[p].active.has(id) {
+            if self.sides[p].mon().fainted() || !self.sides[p].active.has(id) {
                 continue;
             }
             let dur = self.vol_duration(p, id);
@@ -664,7 +667,7 @@ impl Battle {
                     }
                     let q = 1 - p;
                     let lm = self.sides[q].mon();
-                    if self.sides[q].active.species == 0 || lm.fainted || lm.hp == 0 {
+                    if self.sides[q].active.species == 0 || lm.fainted() || lm.hp == 0 {
                         continue;
                     }
                     let mut counter = 1u32;
@@ -739,6 +742,25 @@ impl Battle {
             }
         }
     }
+}
+
+/// Renumber the insertion stamps of the present volatiles to `0..n` (same order) when the 8-bit
+/// counter runs out; absent volatiles' stamps are never read.
+#[cold]
+fn renumber_stamps(a: &mut Active) {
+    let mut ids = [0u8; v::COUNT];
+    let mut n = 0;
+    let mut bits = a.vols;
+    while bits != 0 {
+        ids[n] = bits.trailing_zeros() as u8;
+        bits &= bits - 1;
+        n += 1;
+    }
+    ids[..n].sort_unstable_by_key(|&id| a.vstamp[id as usize]);
+    for (k, &id) in ids[..n].iter().enumerate() {
+        a.vstamp[id as usize] = k as u8;
+    }
+    a.next_stamp = n as u8;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
