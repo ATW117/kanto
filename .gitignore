@@ -25,3 +25,9 @@ bench/results/
 
 # Parity harness outputs
 parity/out/
+
+# Training runs
+runs/
+
+# Claude Code agent worktrees
+.claude/
