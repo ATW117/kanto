@@ -1,11 +1,16 @@
 //! `parity`: differential testing of the native Gen 1 simulator against Pokémon Showdown.
 //!
 //! ```text
-//! parity fuzz     [--battles N] [--seed S] [--teams mixed|random|legal|randbats] [--format gen1ou|gen1nc]
-//!                 [--patch vanilla|pkmn] [--jobs J] [--out DIR] [--fixtures DIR] [--shrink]
+//! parity fuzz     [--battles N] [--seed S] [--teams mixed|random|legal|randbats|stall|targeted|thaw]
+//!                 [--format gen1ou|gen1nc] [--patch vanilla|pkmn] [--prng gen5|sodium|mixed] [--jobs J]
+//!                 [--out DIR] [--fixtures DIR] [--corpus FILE] [--dump FILE]
 //! parity replay   <failures.jsonl|fixture.json>... [--verbose]
 //! parity fixtures [--dir parity/fixtures]
+//! parity regen    <corpus.jsonl|fixture.json>...   (re-record fixtures with the current runner)
+//! parity mutscan  <dump.jsonl>...                   (Node-free replay of `fuzz --dump` traces)
+//! parity shrink   <failures.jsonl>...
 //! parity bench    [--battles N] [--seed S]
+//! parity diff-pkmn [--battles N] [--teams T] [--compat pkmn|vanilla]
 //! ```
 //! See docs/SIM_DESIGN.md ("Parity harness").
 
@@ -107,6 +112,8 @@ fn main() {
         "replay" => replay_files(&args),
         "fixtures" => fixtures(&args),
         "shrink" => shrink(&args),
+        "mutscan" => mutscan(&args),
+        "regen" => regen(&args),
         "bench" => bench::bench(args.num("battles", 2000) as usize, args.num("seed", 1), &args.get("teams", "randbats")),
         "diff-pkmn" => {
             let compat = if args.get("compat", "pkmn") == "vanilla" { sim_gen1::Compat::Vanilla } else { sim_gen1::Compat::Pkmn };
@@ -155,6 +162,14 @@ fn fuzz(args: &Args) {
     let mut corpus_lines = String::new();
     let mut corpus_moves = std::collections::BTreeSet::new();
     let mut corpus_n = 0;
+    // `--dump FILE`: every Showdown trace (spec + trace) as JSON lines, for Node-free replays
+    // (`parity mutscan`, parity/mutate.py).
+    let mut dump = args.kv.get("dump").map(|p| {
+        if let Some(parent) = Path::new(p).parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::io::BufWriter::new(std::fs::File::create(p).unwrap_or_else(|e| panic!("{p}: {e}")))
+    });
     sd.run(&specs, jobs, |i, line| {
         done += 1;
         let trace: Trace = match serde_json::from_str(&line) {
@@ -171,6 +186,11 @@ fn fuzz(args: &Args) {
             return;
         }
         let res = replay(&specs[i], &trace);
+        if let Some(d) = dump.as_mut() {
+            use std::io::Write;
+            let f = Failure { spec: specs[i].clone(), trace: trace.clone(), divergence: None, note: String::new() };
+            writeln!(d, "{}", serde_json::to_string(&f).unwrap()).unwrap();
+        }
         if let Some(end) = &trace.end {
             let w = end.get("winner").and_then(|w| w.as_str()).unwrap_or("");
             let ended = end.get("ended").and_then(|e| e.as_bool()).unwrap_or(false);
@@ -444,6 +464,134 @@ fn fixtures(args: &Args) {
     if bad > 0 {
         std::process::exit(1);
     }
+}
+
+/// `parity regen FILE...`: re-record fixtures with the current runner (after the snapshot format
+/// changes, the stored state hashes / traces are stale). Each battle's spec, with its explicit
+/// choices, is replayed by Showdown; the native sim must still match it (`corpus-*.jsonl`,
+/// `passing/`) or still diverge with the recorded category (`divergent/`, `open/`). Files are
+/// rewritten in place; nothing is written if any battle fails these checks.
+fn regen(args: &Args) {
+    let repo = repo_root();
+    let sd = runner::Showdown::locate(&repo, args.kv.get("ps-dir").map(|s| s.as_str())).unwrap_or_else(|e| panic!("{e}"));
+    let jobs = args.num("jobs", 4) as usize;
+    let run = |specs: &[Spec]| -> Vec<Trace> {
+        let mut out: Vec<Option<Trace>> = vec![None; specs.len()];
+        sd.run(specs, jobs, |i, line| {
+            let t: Trace = serde_json::from_str(&line).unwrap_or_else(|e| panic!("{}: bad trace: {e}", specs[i].id));
+            if let Some(e) = &t.error {
+                panic!("{}: Showdown error: {e}", specs[i].id);
+            }
+            out[i] = Some(t);
+        })
+        .unwrap_or_else(|e| panic!("{e}"));
+        out.into_iter().map(|t| t.expect("missing trace")).collect()
+    };
+    let mut bad = 0;
+    for path in &args.pos[1..] {
+        let path = Path::new(path);
+        if path.extension().is_some_and(|e| e == "jsonl") {
+            let text = std::fs::read_to_string(path).unwrap();
+            let olds: Vec<replay::Compact> = text.lines().filter(|l| !l.trim().is_empty()).map(|l| serde_json::from_str(l).unwrap()).collect();
+            let specs: Vec<Spec> = olds
+                .iter()
+                .map(|c| {
+                    let mut s = c.spec.clone();
+                    s.max_steps = Some(c.steps.len() as u32 - 1);
+                    s
+                })
+                .collect();
+            let traces = run(&specs);
+            let mut lines = String::new();
+            for ((c, s), t) in olds.iter().zip(&specs).zip(&traces) {
+                if t.steps.len() != c.steps.len() {
+                    bad += 1;
+                    println!("{}: {}: {} steps recorded, expected {}", path.display(), s.id, t.steps.len(), c.steps.len());
+                    continue;
+                }
+                if let Replay::Diverged(d) = replay(s, t) {
+                    bad += 1;
+                    println!("{}: {}: diverged at step {}: {}", path.display(), s.id, d.step, d.category);
+                    continue;
+                }
+                let mut spec = c.spec.clone();
+                spec.max_steps = c.spec.max_steps;
+                let mut new = replay::Compact::from_trace(&spec, t, c.steps.len());
+                new.spec.max_steps = c.spec.max_steps;
+                lines.push_str(&serde_json::to_string(&new).unwrap());
+                lines.push('\n');
+            }
+            if bad == 0 {
+                std::fs::write(path, lines).unwrap();
+                println!("{}: {} battles re-recorded", path.display(), olds.len());
+            }
+        } else {
+            let old = load_failures(path).remove(0);
+            let mut spec = old.spec.clone();
+            let n = spec.choices.as_ref().map(|c| c.len()).unwrap_or(0);
+            spec.max_steps = Some(n as u32);
+            let trace = run(std::slice::from_ref(&spec)).remove(0);
+            let res = replay(&old.spec, &trace);
+            let want = old.divergence.as_ref().map(|d| d.category.clone());
+            let mut new = old.clone();
+            match (res, want) {
+                (Replay::Match { .. }, None) => new.trace = trace,
+                (Replay::Diverged(d), Some(w)) if d.category == w => {
+                    let mut t = trace;
+                    t.steps.truncate(d.step + 1);
+                    new.trace = t;
+                    new.divergence = Some(*d);
+                }
+                (r, w) => {
+                    bad += 1;
+                    let got = match r {
+                        Replay::Match { .. } => "match".to_string(),
+                        Replay::Diverged(d) => d.category,
+                    };
+                    println!("{}: expected {:?}, got {got}", path.display(), w);
+                    continue;
+                }
+            }
+            std::fs::write(path, serde_json::to_string_pretty(&new).unwrap()).unwrap();
+            println!("{}: re-recorded", path.display());
+        }
+    }
+    if bad > 0 {
+        std::process::exit(1);
+    }
+}
+
+/// `parity mutscan DUMP...`: replay recorded Showdown traces (`fuzz --dump`) without Node and
+/// print one summary line: battles, diverged, the first divergence and the top categories. Used
+/// by parity/mutate.py to decide whether a source mutant is caught.
+fn mutscan(args: &Args) {
+    use std::io::BufRead;
+    let mut first: Option<(usize, String)> = None;
+    let (mut n, mut div) = (0usize, 0usize);
+    let mut cats: BTreeMap<String, usize> = BTreeMap::new();
+    for p in &args.pos[1..] {
+        let f = std::fs::File::open(p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        for line in std::io::BufReader::new(f).lines() {
+            let line = line.unwrap();
+            if line.trim().is_empty() {
+                continue;
+            }
+            let f: Failure = serde_json::from_str(&line).expect("dump line");
+            if let Replay::Diverged(d) = replay(&f.spec, &f.trace) {
+                div += 1;
+                *cats.entry(d.category.clone()).or_default() += 1;
+                if first.is_none() {
+                    first = Some((n + 1, format!("{} step {}", d.category, d.step)));
+                }
+            }
+            n += 1;
+        }
+    }
+    let mut c: Vec<_> = cats.into_iter().collect();
+    c.sort_by(|a, b| b.1.cmp(&a.1));
+    c.truncate(3);
+    let first = first.map(|(i, s)| format!("#{i} {s}")).unwrap_or_else(|| "-".into());
+    println!("{}", serde_json::json!({"battles": n, "diverged": div, "first": first, "top": c}));
 }
 
 /// Minimise failing battles: for each failure, search random battles between only the Pokémon

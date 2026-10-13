@@ -106,3 +106,40 @@ impl MoveData {
 pub fn to_id(name: &str) -> String {
     name.chars().filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_lowercase()).collect()
 }
+
+/// `toID(name)` with Showdown's Gen 1 aliases resolved (`hijumpkick` -> `highjumpkick`,
+/// `vicegrip` -> `visegrip`, ...), as `Dex.moves.get` / `Dex.species.get` do.
+pub fn canonical_id(name: &str) -> String {
+    let id = to_id(name);
+    match gen1::ALIASES.binary_search_by(|(a, _)| (*a).cmp(id.as_str())) {
+        Ok(i) => gen1::ALIASES[i].1.to_string(),
+        Err(_) => id,
+    }
+}
+
+/// Gen 1 move id (1..=165) for a Showdown name, ID or alias.
+pub fn gen1_move_id(name: &str) -> Option<u8> {
+    let id = canonical_id(name);
+    (1..=165u8).find(|&i| gen1::MOVES[i as usize].id == id)
+}
+
+/// Gen 1 species id (1..=151) for a Showdown name, ID or alias.
+pub fn gen1_species_id(name: &str) -> Option<u8> {
+    let id = canonical_id(name);
+    (1..=151u8).find(|&i| gen1::SPECIES[i as usize].id == id)
+}
+
+#[cfg(test)]
+mod alias_tests {
+    use super::*;
+
+    #[test]
+    fn aliases_resolve() {
+        assert!(gen1::ALIASES.windows(2).all(|w| w[0].0 < w[1].0), "ALIASES must be sorted");
+        assert_eq!(gen1_move_id("hijumpkick"), gen1_move_id("High Jump Kick"));
+        assert_eq!(gen1_move_id("vicegrip"), gen1_move_id("Vise Grip"));
+        assert!(gen1_move_id("hijumpkick").is_some());
+        assert_eq!(gen1_species_id("Mr. Mime"), Some(122));
+        assert_eq!(gen1_move_id("notamove"), None);
+    }
+}

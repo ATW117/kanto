@@ -127,21 +127,26 @@
                   "spe": 0
                 },
                 "lastMove": null,
+                "maybeLocked": false,
+                "moveThisTurn": "",
                 "moves": [
                   [
                     "bide",
                     16,
-                    false
+                    false,
+                    16
                   ],
                   [
                     "screech",
                     61,
-                    false
+                    false,
+                    61
                   ],
                   [
                     "constrict",
                     56,
-                    false
+                    false,
+                    56
                   ]
                 ],
                 "slot": 0,
@@ -161,10 +166,12 @@
                   "spe": 19
                 },
                 "transformed": false,
+                "trapped": false,
                 "types": [
                   "Dragon",
                   "Flying"
                 ],
+                "volOrder": [],
                 "volatiles": {}
               },
               "lastEnemyMove": null,
@@ -186,7 +193,8 @@
                     56
                   ],
                   "speed": 19,
-                  "status": ""
+                  "status": "",
+                  "subFainted": false
                 }
               ]
             },
@@ -202,21 +210,26 @@
                   "spe": 0
                 },
                 "lastMove": null,
+                "maybeLocked": false,
+                "moveThisTurn": "",
                 "moves": [
                   [
                     "disable",
                     32,
-                    false
+                    false,
+                    32
                   ],
                   [
                     "leechseed",
                     16,
-                    false
+                    false,
+                    16
                   ],
                   [
                     "sonicboom",
                     32,
-                    false
+                    false,
+                    32
                   ]
                 ],
                 "slot": 0,
@@ -236,9 +249,11 @@
                   "spe": 109
                 },
                 "transformed": false,
+                "trapped": false,
                 "types": [
                   "Normal"
                 ],
+                "volOrder": [],
                 "volatiles": {}
               },
               "lastEnemyMove": null,
@@ -260,7 +275,8 @@
                     32
                   ],
                   "speed": 109,
-                  "status": ""
+                  "status": "",
+                  "subFainted": false
                 }
               ]
             }
@@ -341,21 +357,26 @@
                   "spe": 0
                 },
                 "lastMove": "bide",
+                "maybeLocked": false,
+                "moveThisTurn": "",
                 "moves": [
                   [
                     "bide",
                     15,
-                    false
+                    false,
+                    16
                   ],
                   [
                     "screech",
                     61,
-                    true
+                    true,
+                    61
                   ],
                   [
                     "constrict",
                     56,
-                    false
+                    false,
+                    56
                   ]
                 ],
                 "slot": 0,
@@ -375,9 +396,14 @@
                   "spe": 19
                 },
                 "transformed": false,
+                "trapped": false,
                 "types": [
                   "Dragon",
                   "Flying"
+                ],
+                "volOrder": [
+                  "disable",
+                  "bide"
                 ],
                 "volatiles": {
                   "bide": {
@@ -410,7 +436,8 @@
                     56
                   ],
                   "speed": 19,
-                  "status": ""
+                  "status": "",
+                  "subFainted": false
                 }
               ]
             },
@@ -426,21 +453,26 @@
                   "spe": 0
                 },
                 "lastMove": "disable",
+                "maybeLocked": false,
+                "moveThisTurn": "",
                 "moves": [
                   [
                     "disable",
                     31,
-                    false
+                    false,
+                    32
                   ],
                   [
                     "leechseed",
                     16,
-                    false
+                    false,
+                    16
                   ],
                   [
                     "sonicboom",
                     32,
-                    false
+                    false,
+                    32
                   ]
                 ],
                 "slot": 0,
@@ -460,9 +492,11 @@
                   "spe": 109
                 },
                 "transformed": false,
+                "trapped": false,
                 "types": [
                   "Normal"
                 ],
+                "volOrder": [],
                 "volatiles": {}
               },
               "lastEnemyMove": "disable",
@@ -484,7 +518,8 @@
                     32
                   ],
                   "speed": 109,
-                  "status": ""
+                  "status": "",
+                  "subFainted": false
                 }
               ]
             }
@@ -495,9 +530,9 @@
       }
     ],
     "end": {
-      "ended": true,
-      "turn": 3,
-      "winner": "p2"
+      "ended": false,
+      "turn": 2,
+      "winner": ""
     },
     "error": null
   },

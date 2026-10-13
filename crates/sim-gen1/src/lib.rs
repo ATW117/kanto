@@ -12,6 +12,7 @@ mod moves;
 pub mod ser;
 pub mod state;
 
+pub use events::VolIter;
 pub use battle::{calc_pp, calc_stats, req, MonSpec, ReqMove, TeamError};
 pub use sim_core::{Choice, Event, IllegalChoice, Outcome, Player, Prng, Request, Sink};
 pub use state::{Battle, Compat, Rules};

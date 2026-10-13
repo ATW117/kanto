@@ -30,15 +30,13 @@ impl SetJson {
         }
     }
 
+    /// Resolve names the way Showdown's dex does (case/punctuation-insensitive, aliases such as
+    /// `hijumpkick` accepted), so a spec Showdown accepts is never reported as a "spec" failure.
     pub fn to_mon(&self) -> Result<MonSpec, String> {
-        let sid = sim_data::to_id(&self.species);
-        let species = (1..=151u8)
-            .find(|&i| SPECIES[i as usize].id == sid)
-            .ok_or_else(|| format!("unknown species {}", self.species))?;
+        let species = sim_data::gen1_species_id(&self.species).ok_or_else(|| format!("unknown species {}", self.species))?;
         let mut moves = [0u8; 4];
         for (k, name) in self.moves.iter().enumerate().take(4) {
-            let id = sim_data::to_id(name);
-            moves[k] = (1..=165u8).find(|&i| MOVES[i as usize].id == id).ok_or_else(|| format!("unknown move {name}"))?;
+            moves[k] = sim_data::gen1_move_id(name).ok_or_else(|| format!("unknown move {name}"))?;
         }
         let get = |m: &BTreeMap<String, u8>, d: u8| -> [u8; 6] { std::array::from_fn(|i| *m.get(STATS[i]).unwrap_or(&d)) };
         Ok(MonSpec { species, level: self.level, moves, ivs: get(&self.ivs, 31), evs: get(&self.evs, 0) })
@@ -119,6 +117,13 @@ pub enum TeamKind {
     Stall,
     /// A mix of random/legal/randbats (and some stall).
     Mixed,
+    /// Scenario teams that force rare Gen 1 mechanics (one of [`SCENARIOS`] per battle, both
+    /// sides drawn from it): freeze thaw, Disable vs locked moves, Counter, copy moves,
+    /// Substitute, trapping + switching, PP stalling, Toxic + Leech Seed, boosts, the Endless
+    /// Battle Clause, Bide, speed ties, OHKO and friends.
+    Targeted,
+    /// The `thaw` scenario only: freezing moves against Fire moves (Fire thaws a frozen target).
+    Thaw,
 }
 
 impl TeamKind {
@@ -129,8 +134,125 @@ impl TeamKind {
             "randbats" => TeamKind::RandBats,
             "mixed" => TeamKind::Mixed,
             "stall" => TeamKind::Stall,
+            "targeted" => TeamKind::Targeted,
+            "thaw" => TeamKind::Thaw,
             _ => return None,
         })
+    }
+}
+
+/// Targeted scenarios: (name, move pool of one side, move pool of the other). The first 13 are
+/// ported from the simulator audit's generator; `freeze` (both last Pokémon frozen: Endless
+/// Battle Clause) and `mirror` (Mirror Move against Mirror Move, with residual damage) were
+/// added for mutants the others could not reach. `speedtie`, `endless` and `freeze` build their
+/// teams specially.
+pub const SCENARIOS: [(&str, &[&str], &[&str]); 15] = [
+    ("freeze", &["icebeam", "blizzard", "icepunch", "aurorabeam", "recover", "softboiled", "splash"], &["icebeam", "blizzard", "icepunch", "aurorabeam", "recover", "softboiled", "splash"]),
+    ("mirror", &["mirrormove", "toxic", "leechseed", "bodyslam", "wrap", "hyperbeam"], &["mirrormove", "toxic", "leechseed", "psychic", "thrash", "metronome"]),
+    ("bide", &["bide", "disable", "substitute", "counter", "metronome"], &["bide", "dig", "fly", "hyperbeam", "seismictoss", "wrap", "splash"]),
+    ("boosts", &["amnesia", "swordsdance", "agility", "growth", "sharpen", "barrier", "acidarmor", "minimize", "doubleteam", "thunderwave", "haze", "psychic"], &["glare", "thunderwave", "ember", "screech", "growl", "leer", "stringshot", "sandattack", "smokescreen", "haze", "focusenergy"]),
+    ("copy", &["transform", "mimic", "metronome", "mirrormove", "conversion"], &["transform", "mimic", "metronome", "mirrormove", "disable", "splash", "wrap", "hyperbeam"]),
+    ("counter", &["counter", "bide", "substitute", "seismictoss", "nightshade", "bodyslam", "metronome", "mirrormove"], &["counter", "bodyslam", "submission", "seismictoss", "sonicboom", "dragonrage", "superfang", "quickattack", "doublekick", "furyattack", "hyperbeam", "psywave", "bide"]),
+    ("disable_locked", &["disable", "counter", "substitute", "seismictoss", "mimic"], &["thrash", "petaldance", "wrap", "bind", "firespin", "clamp", "hyperbeam", "fly", "dig", "skyattack", "solarbeam", "rage", "bide", "razorwind", "skullbash"]),
+    ("endless", &["transform"], &["transform"]),
+    ("ohko_misc", &["fissure", "horndrill", "guillotine", "psywave", "superfang", "dreameater", "hijumpkick", "jumpkick", "explosion", "selfdestruct", "swift", "dig"], &["fly", "dig", "substitute", "minimize", "doubleteam", "rest", "hypnosis", "lovelykiss"]),
+    ("pp_stall", &["skyattack", "hyperbeam", "fireblast", "mimic", "metronome", "transform", "disable", "spore", "wrap"], &["skyattack", "hyperbeam", "fireblast", "thunder", "hydropump", "mirrormove", "focusenergy", "haze"]),
+    ("speedtie", &["bodyslam", "thunderwave", "quickattack", "counter", "hyperbeam", "wrap", "sleeppowder", "toxic", "confuseray", "substitute", "agility"], &[]),
+    ("sub", &["substitute", "wrap", "bind", "leechseed", "toxic", "hyperbeam", "explosion", "megadrain", "doublekick", "pinmissile", "confuseray", "psybeam", "bide"], &["substitute", "wrap", "bind", "leechseed", "toxic", "thunderwave", "sleeppowder", "twineedle", "bonemerang", "furyswipes", "absorb", "dreameater", "hyperbeam", "counter"]),
+    ("thaw", &["icebeam", "blizzard", "icepunch", "aurorabeam"], &["fireblast", "ember", "flamethrower", "firepunch", "firespin", "recover", "rest", "substitute"]),
+    ("toxic_seed", &["toxic", "leechseed", "rest", "recover", "haze", "substitute", "softboiled"], &["toxic", "leechseed", "rest", "haze", "bodyslam", "psychic", "reflect", "lightscreen"]),
+    ("trap_switch", &["wrap", "bind", "firespin", "clamp"], &["wrap", "bind", "clamp", "firespin", "agility", "substitute", "counter", "hyperbeam"]),
+];
+
+const FAST: [&str; 10] = ["Jolteon", "Electrode", "Aerodactyl", "Persian", "Starmie", "Alakazam", "Tauros", "Dugtrio", "Mewtwo", "Mew"];
+const ANY: [&str; 37] = [
+    "Tauros", "Chansey", "Snorlax", "Starmie", "Alakazam", "Exeggutor", "Zapdos", "Rhydon", "Lapras", "Jynx", "Gengar", "Slowbro",
+    "Cloyster", "Dragonite", "Ditto", "Mew", "Mewtwo", "Golem", "Victreebel", "Tentacruel", "Dewgong", "Articuno", "Moltres",
+    "Arcanine", "Ninetales", "Charizard", "Haunter", "Gastly", "Clefable", "Wigglytuff", "Kangaskhan", "Hitmonlee", "Machamp",
+    "Onix", "Abra", "Magikarp", "Caterpie",
+];
+
+fn pick<'a>(rng: &mut Rng, xs: &[&'a str]) -> &'a str {
+    xs[rng.below(xs.len() as u64) as usize]
+}
+
+/// One scenario Pokémon: 1-4 distinct moves from `pool`, random DVs/stat exp, mostly level 100.
+fn scenario_mon(rng: &mut Rng, pool: &[&str], species: Option<&str>, level: Option<u8>) -> MonSpec {
+    let species = sim_data::gen1_species_id(species.unwrap_or_else(|| pick(rng, &ANY))).expect("scenario species");
+    let mut ids: Vec<u8> = pool.iter().map(|m| sim_data::gen1_move_id(m).expect("scenario move")).collect();
+    let k = (1 + rng.below(4) as usize).min(ids.len());
+    let mut moves = [0u8; 4];
+    for slot in moves.iter_mut().take(k) {
+        *slot = ids.swap_remove(rng.below(ids.len() as u64) as usize);
+    }
+    let level = level.unwrap_or_else(|| match rng.below(5) {
+        0..=2 => 100,
+        3 => 1 + rng.below(100) as u8,
+        _ => 50 + rng.below(51) as u8,
+    });
+    let mut ivs: [u8; 6] = std::array::from_fn(|_| 2 * rng.below(16) as u8);
+    ivs[4] = ivs[3];
+    let mut evs: [u8; 6] = std::array::from_fn(|_| if rng.below(3) < 2 { 255 } else { rng.below(256) as u8 });
+    evs[4] = evs[3];
+    MonSpec { species, level, moves, ivs, evs }
+}
+
+/// Both teams of a targeted battle for scenario `s` (index into [`SCENARIOS`]).
+pub fn scenario_teams(rng: &mut Rng, s: usize) -> (Vec<MonSpec>, Vec<MonSpec>) {
+    let (name, a, b) = SCENARIOS[s];
+    let (n1, n2) = (1 + rng.below(4) as usize, 1 + rng.below(4) as usize);
+    match name {
+        "speedtie" => {
+            let sp = pick(rng, &FAST);
+            let mut p1: Vec<MonSpec> = (0..n1).map(|_| scenario_mon(rng, a, Some(sp), Some(100))).collect();
+            let mut p2: Vec<MonSpec> =
+                if rng.below(2) == 0 { p1.clone() } else { (0..n2).map(|_| scenario_mon(rng, a, Some(sp), Some(100))).collect() };
+            for m in p1.iter_mut().chain(p2.iter_mut()) {
+                m.ivs[5] = 30;
+                m.evs[5] = 255;
+            }
+            (p1, p2)
+        }
+        "freeze" => {
+            // Bulky non-Ice species (Ice types cannot be frozen by Ice moves), 1-2 per side.
+            const BULKY: [&str; 9] = ["Chansey", "Snorlax", "Slowbro", "Tauros", "Starmie", "Alakazam", "Exeggutor", "Golem", "Rhydon"];
+            let (n1, n2) = (1 + rng.below(2) as usize, 1 + rng.below(2) as usize);
+            let p1 = (0..n1)
+                .map(|_| {
+                    let sp = pick(rng, &BULKY);
+                    scenario_mon(rng, a, Some(sp), None)
+                })
+                .collect();
+            let p2 = (0..n2)
+                .map(|_| {
+                    let sp = pick(rng, &BULKY);
+                    scenario_mon(rng, b, Some(sp), None)
+                })
+                .collect();
+            (p1, p2)
+        }
+        "endless" => {
+            let p1 = (0..n1)
+                .map(|_| {
+                    let sp = pick(rng, &["Ditto", "Mew", "Gengar"]);
+                    scenario_mon(rng, &["transform"], Some(sp), None)
+                })
+                .collect();
+            let p2 = (0..n2)
+                .map(|_| {
+                    let pool: &[&str] = if rng.below(10) < 7 { &["transform"] } else { &["splash"] };
+                    let sp = pick(rng, &["Ditto", "Mew", "Gengar", "Haunter"]);
+                    scenario_mon(rng, pool, Some(sp), None)
+                })
+                .collect();
+            (p1, p2)
+        }
+        _ => {
+            let (a, b) = if rng.below(2) == 0 { (b, a) } else { (a, b) };
+            let p1 = (0..n1).map(|_| scenario_mon(rng, a, None, None)).collect();
+            let p2 = (0..n2).map(|_| scenario_mon(rng, b, None, None)).collect();
+            (p1, p2)
+        }
     }
 }
 
@@ -201,8 +323,18 @@ pub fn random_team(rng: &mut Rng, kind: TeamKind) -> Vec<MonSpec> {
 
 /// A random fuzz spec. `prng`: "gen5" (default), "sodium", or "mixed".
 pub fn random_spec(id: String, rng: &mut Rng, kind: TeamKind, format: &str, patch: &str, prng: &str) -> Spec {
-    let p1 = random_team(rng, kind);
-    let p2 = random_team(rng, kind);
+    // Targeted battles carry their scenario in the id (e.g. `s1-17-copy`) for the reports.
+    let (id, (p1, p2)) = match kind {
+        TeamKind::Targeted | TeamKind::Thaw => {
+            let s = if kind == TeamKind::Thaw {
+                SCENARIOS.iter().position(|s| s.0 == "thaw").unwrap()
+            } else {
+                rng.below(SCENARIOS.len() as u64) as usize
+            };
+            (format!("{id}-{}", SCENARIOS[s].0), scenario_teams(rng, s))
+        }
+        _ => (id, (random_team(rng, kind), random_team(rng, kind))),
+    };
     let sodium = match prng {
         "sodium" => true,
         "mixed" => rng.below(2) == 0,

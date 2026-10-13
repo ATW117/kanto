@@ -130,16 +130,20 @@
                   "spe": 0
                 },
                 "lastMove": null,
+                "maybeLocked": false,
+                "moveThisTurn": "",
                 "moves": [
                   [
                     "metronome",
                     16,
-                    false
+                    false,
+                    16
                   ],
                   [
                     "bind",
                     32,
-                    false
+                    false,
+                    32
                   ]
                 ],
                 "slot": 0,
@@ -159,10 +163,12 @@
                   "spe": 288
                 },
                 "transformed": false,
+                "trapped": false,
                 "types": [
                   "Ghost",
                   "Poison"
                 ],
+                "volOrder": [],
                 "volatiles": {}
               },
               "lastEnemyMove": null,
@@ -183,7 +189,8 @@
                     32
                   ],
                   "speed": 288,
-                  "status": ""
+                  "status": "",
+                  "subFainted": false
                 }
               ]
             },
@@ -199,21 +206,26 @@
                   "spe": 0
                 },
                 "lastMove": null,
+                "maybeLocked": false,
+                "moveThisTurn": "",
                 "moves": [
                   [
                     "firespin",
                     24,
-                    false
+                    false,
+                    24
                   ],
                   [
                     "pound",
                     56,
-                    false
+                    false,
+                    56
                   ],
                   [
                     "mirrormove",
                     32,
-                    false
+                    false,
+                    32
                   ]
                 ],
                 "slot": 0,
@@ -233,10 +245,12 @@
                   "spe": 211
                 },
                 "transformed": false,
+                "trapped": false,
                 "types": [
                   "Water",
                   "Flying"
                 ],
+                "volOrder": [],
                 "volatiles": {}
               },
               "lastEnemyMove": null,
@@ -258,7 +272,8 @@
                     32
                   ],
                   "speed": 211,
-                  "status": ""
+                  "status": "",
+                  "subFainted": false
                 }
               ]
             }
@@ -348,16 +363,20 @@
                   "spe": 0
                 },
                 "lastMove": "metronome",
+                "maybeLocked": false,
+                "moveThisTurn": "",
                 "moves": [
                   [
                     "metronome",
                     16,
-                    false
+                    false,
+                    16
                   ],
                   [
                     "bind",
                     32,
-                    false
+                    false,
+                    32
                   ]
                 ],
                 "slot": 0,
@@ -377,13 +396,19 @@
                   "spe": 288
                 },
                 "transformed": false,
+                "trapped": true,
                 "types": [
                   "Ghost",
                   "Poison"
                 ],
+                "volOrder": [
+                  "twoturnmove",
+                  "partiallytrapped"
+                ],
                 "volatiles": {
                   "partiallytrapped": {
-                    "duration": 1
+                    "duration": 1,
+                    "source": 0
                   },
                   "twoturnmove": {
                     "move": "skyattack"
@@ -408,7 +433,8 @@
                     32
                   ],
                   "speed": 288,
-                  "status": ""
+                  "status": "",
+                  "subFainted": false
                 }
               ]
             },
@@ -424,21 +450,26 @@
                   "spe": 0
                 },
                 "lastMove": "firespin",
+                "maybeLocked": false,
+                "moveThisTurn": "",
                 "moves": [
                   [
                     "firespin",
                     23,
-                    false
+                    false,
+                    24
                   ],
                   [
                     "pound",
                     56,
-                    false
+                    false,
+                    56
                   ],
                   [
                     "mirrormove",
                     32,
-                    false
+                    false,
+                    32
                   ]
                 ],
                 "slot": 0,
@@ -458,14 +489,19 @@
                   "spe": 211
                 },
                 "transformed": false,
+                "trapped": false,
                 "types": [
                   "Water",
                   "Flying"
+                ],
+                "volOrder": [
+                  "partialtrappinglock"
                 ],
                 "volatiles": {
                   "partialtrappinglock": {
                     "damage": 17,
                     "duration": 1,
+                    "locked": 0,
                     "move": "firespin",
                     "totalDuration": 2
                   }
@@ -490,7 +526,8 @@
                     32
                   ],
                   "speed": 211,
-                  "status": ""
+                  "status": "",
+                  "subFainted": false
                 }
               ]
             }
@@ -543,16 +580,20 @@
                   "spe": 0
                 },
                 "lastMove": "metronome",
+                "maybeLocked": false,
+                "moveThisTurn": "",
                 "moves": [
                   [
                     "metronome",
                     16,
-                    false
+                    false,
+                    16
                   ],
                   [
                     "bind",
                     32,
-                    false
+                    false,
+                    32
                   ]
                 ],
                 "slot": 0,
@@ -572,12 +613,18 @@
                   "spe": 288
                 },
                 "transformed": false,
+                "trapped": true,
                 "types": [
                   "Ghost",
                   "Poison"
                 ],
+                "volOrder": [
+                  "twoturnmove",
+                  "fakepartiallytrapped"
+                ],
                 "volatiles": {
                   "fakepartiallytrapped": {
+                    "counterpart": 0,
                     "duration": 1
                   },
                   "twoturnmove": {
@@ -603,7 +650,8 @@
                     32
                   ],
                   "speed": 288,
-                  "status": ""
+                  "status": "",
+                  "subFainted": false
                 }
               ]
             },
@@ -619,21 +667,26 @@
                   "spe": 0
                 },
                 "lastMove": "firespin",
+                "maybeLocked": true,
+                "moveThisTurn": "",
                 "moves": [
                   [
                     "firespin",
                     23,
-                    false
+                    false,
+                    24
                   ],
                   [
                     "pound",
                     56,
-                    false
+                    false,
+                    56
                   ],
                   [
                     "mirrormove",
                     32,
-                    false
+                    false,
+                    32
                   ]
                 ],
                 "slot": 0,
@@ -653,12 +706,17 @@
                   "spe": 211
                 },
                 "transformed": false,
+                "trapped": false,
                 "types": [
                   "Water",
                   "Flying"
                 ],
+                "volOrder": [
+                  "fakepartiallytrapped"
+                ],
                 "volatiles": {
                   "fakepartiallytrapped": {
+                    "counterpart": 0,
                     "duration": 1
                   }
                 }
@@ -682,7 +740,8 @@
                     32
                   ],
                   "speed": 211,
-                  "status": ""
+                  "status": "",
+                  "subFainted": false
                 }
               ]
             }
@@ -693,9 +752,9 @@
       }
     ],
     "end": {
-      "ended": true,
-      "turn": 26,
-      "winner": "p1"
+      "ended": false,
+      "turn": 3,
+      "winner": ""
     },
     "error": null
   },

@@ -128,14 +128,14 @@ macro_rules! bin_struct {
 bin_struct!(MoveSlot { id, pp, maxpp, disabled });
 bin_struct!(Mon {
     species, level, ivs, evs, stats, hp, status, slp_time, slp_start, status_self, moves, n_moves, speed, fainted,
-    faint_queued, sub_fainted, modified,
+    faint_queued, sub_fainted, modified, trapped, maybe_locked, maybe_disabled,
 });
 bin_struct!(Active {
     species, types, stored, modified, boosts, transformed, n_slots, virt, vslots, vols, vstamp, next_stamp,
     confusion_time, flinch_dur, pt_dur, pt_maybe_locked, pt_source, fpt_dur, fpt_counterpart, ptl_dur, ptl_total,
     ptl_move, ptl_damage, ptl_locked, lockedmove_move, lockedmove_time, lockedmove_acc, twoturn_move, bide_damage,
     bide_time, disable_move, disable_slot, disable_time, sub_hp, rage_acc, residual_counter, last_move,
-    move_this_turn, trapped, maybe_locked, maybe_disabled, switch_flag,
+    move_this_turn, switch_flag,
 });
 bin_struct!(Side {
     mons, n, order, active, left, last_selected_move, last_enemy_selected_move, last_selected_move_slot, last_move,

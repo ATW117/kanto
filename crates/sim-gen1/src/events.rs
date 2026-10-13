@@ -6,7 +6,7 @@
 use crate::battle::modify_stat;
 use crate::state::*;
 use sim_core::sort::{sort_by_priority, Priority, ORDER_UNSET};
-use sim_core::{Player, Sink};
+use sim_core::{Event, Player, Sink};
 use sim_data::gen1::{self as data};
 
 /// What caused damage (`effect` in `Battle#damage`); decides whether `lastDamage` is updated.
@@ -157,20 +157,26 @@ impl Battle {
     // ---- Status ------------------------------------------------------------------------------
 
     /// `Pokemon#setStatus(status, source, sourceEffect, ignoreImmunities)` for the active of `p`.
-    /// `from_move` says whether the source effect is a move with a `status` (for messages only).
-    pub(crate) fn set_status(&mut self, p: Player, status: u8, source: Player, ignore_immunities: bool) -> bool {
+    /// `status_move` says whether the source effect is a move with a `status` of its own (a
+    /// status move such as Toxic, not a secondary effect): only then does Showdown print `-fail`
+    /// (status already set) or `-immune` (Poison types vs poison).
+    pub(crate) fn set_status<S: Sink>(&mut self, p: Player, status: u8, source: Player, ignore_immunities: bool, status_move: bool, s: &mut S) -> bool {
         let sd = &self.sides[p];
         if sd.mon().hp == 0 {
             return false;
         }
         if sd.mon().status == status {
+            if status_move {
+                s.event(Event::Fail);
+            }
             return false;
         }
         if !ignore_immunities {
-            if sd.mon().fainted {
-                return false;
-            }
-            if matches!(status, st::PSN | st::TOX) && sd.active.types.contains(&data_type_poison()) {
+            let immune = sd.mon().fainted || (matches!(status, st::PSN | st::TOX) && sd.active.types.contains(&data_type_poison()));
+            if immune {
+                if status_move {
+                    s.event(Event::Immune);
+                }
                 return false;
             }
         }
@@ -457,18 +463,19 @@ impl Battle {
         }
         sort_by_priority(&mut self.rng, &mut list[..n], "DisableMove.speedSort");
         for &(_, h) in &list[..n] {
-            let a = &mut self.sides[p].active;
+            let a = self.sides[p].active;
+            let maybe_locked = &mut self.sides[p].mon_mut().maybe_locked;
             match h {
-                100 | v::BIDE => a.maybe_locked = false,
+                100 | v::BIDE => *maybe_locked = false,
                 v::PARTIALLYTRAPPED => {
                     if a.pt_maybe_locked {
-                        a.maybe_locked = true;
+                        *maybe_locked = true;
                     }
                 }
-                v::FAKEPARTIALLYTRAPPED => a.maybe_locked = true,
+                v::FAKEPARTIALLYTRAPPED => *maybe_locked = true,
                 v::PARTIALTRAPPINGLOCK => {
                     if a.ptl_total as i32 - a.ptl_dur as i32 > 1 {
-                        a.maybe_locked = true;
+                        *maybe_locked = true;
                     }
                 }
                 v::DISABLE => {
@@ -483,7 +490,7 @@ impl Battle {
     }
 
     /// The active's volatiles in insertion order.
-    pub(crate) fn vol_order(&self, p: Player) -> VolIter {
+    pub fn vol_order(&self, p: Player) -> VolIter {
         let a = &self.sides[p].active;
         let mut ids = [0u8; v::COUNT];
         let mut n = 0;
@@ -727,7 +734,8 @@ enum BoostResult {
     Zero,
 }
 
-pub(crate) struct VolIter {
+/// Iterator over an active Pokémon's volatile ids (`state::v`) in insertion order.
+pub struct VolIter {
     ids: [u8; v::COUNT],
     n: usize,
     i: usize,

@@ -13,7 +13,12 @@ fn mid(id: u8) -> Value {
     }
 }
 
-fn side_snap(sd: &Side) -> Value {
+fn stat_obj(s: [u16; 5]) -> Value {
+    json!({"atk": s[0], "def": s[1], "spa": s[2], "spd": s[3], "spe": s[4]})
+}
+
+fn side_snap(b: &Battle, p: usize) -> Value {
+    let sd = &b.sides[p];
     let mut team = Vec::new();
     for i in 0..sd.n as usize {
         let m = &sd.mons[i];
@@ -23,8 +28,15 @@ fn side_snap(sd: &Side) -> Value {
         o.insert("fainted".into(), json!(m.fainted));
         o.insert("speed".into(), json!(m.speed));
         o.insert("pp".into(), json!(m.moves[..m.n_moves as usize].iter().map(|s| s.pp).collect::<Vec<_>>()));
+        o.insert("subFainted".into(), json!(m.sub_fainted));
         if m.status == st::SLP {
             o.insert("slp".into(), json!([m.slp_time, m.slp_start]));
+        }
+        if (st::SLP..=st::TOX).contains(&m.status) {
+            o.insert("statusSelf".into(), json!(m.status_self));
+        }
+        if i != sd.active_slot() {
+            o.insert("modified".into(), stat_obj(m.modified));
         }
         team.push(Value::Object(o));
     }
@@ -37,12 +49,11 @@ fn side_snap(sd: &Side) -> Value {
         } else {
             vec![TYPE_NAMES[a.types[0] as usize], TYPE_NAMES[a.types[1] as usize]]
         };
-        let b = a.boosts;
-        let stat = |s: [u16; 5]| json!({"atk": s[0], "def": s[1], "spa": s[2], "spd": s[3], "spe": s[4]});
+        let bo = a.boosts;
         let moves: Vec<Value> = (0..a.n_slots as usize)
             .map(|i| {
                 let s = sd.slot(i);
-                json!([move_id_str(s.id), s.pp, s.disabled])
+                json!([move_id_str(s.id), s.pp, s.disabled, s.maxpp])
             })
             .collect();
         let mut vols = Map::new();
@@ -51,16 +62,22 @@ fn side_snap(sd: &Side) -> Value {
                 vols.insert(V_IDS[id as usize].into(), vol_snap(sd, id));
             }
         }
+        // Insertion order, as the simulator itself iterates it for handler sorting.
+        let vol_order: Vec<&str> = b.vol_order(p).map(|id| V_IDS[id as usize]).collect();
         json!({
             "slot": sd.order[0],
             "species": SPECIES[a.species as usize].id,
             "types": types,
-            "boosts": {"atk": b[0], "def": b[1], "spa": b[2], "spd": b[3], "spe": b[4], "accuracy": b[5], "evasion": b[6]},
-            "stats": stat(a.modified),
-            "stored": stat(a.stored),
+            "boosts": {"atk": bo[0], "def": bo[1], "spa": bo[2], "spd": bo[3], "spe": bo[4], "accuracy": bo[5], "evasion": bo[6]},
+            "stats": stat_obj(a.modified),
+            "stored": stat_obj(a.stored),
             "moves": moves,
             "volatiles": vols,
+            "volOrder": vol_order,
             "lastMove": mid(a.last_move),
+            "moveThisTurn": move_id_str(a.move_this_turn),
+            "trapped": sd.mon().trapped,
+            "maybeLocked": sd.mon().maybe_locked,
             "transformed": a.transformed,
         })
     };
@@ -84,14 +101,15 @@ fn vol_snap(sd: &Side, id: u8) -> Value {
         v::FLINCH => json!({"duration": a.flinch_dur}),
         v::PARTIALLYTRAPPED => {
             if a.pt_maybe_locked {
-                json!({"duration": a.pt_dur, "maybeLocked": true})
+                json!({"duration": a.pt_dur, "maybeLocked": true, "source": a.pt_source})
             } else {
-                json!({"duration": a.pt_dur})
+                json!({"duration": a.pt_dur, "source": a.pt_source})
             }
         }
-        v::FAKEPARTIALLYTRAPPED => json!({"duration": a.fpt_dur}),
+        v::FAKEPARTIALLYTRAPPED => json!({"duration": a.fpt_dur, "counterpart": a.fpt_counterpart}),
         v::PARTIALTRAPPINGLOCK => json!({
-            "duration": a.ptl_dur, "totalDuration": a.ptl_total, "damage": a.ptl_damage, "move": move_id_str(a.ptl_move)
+            "duration": a.ptl_dur, "totalDuration": a.ptl_total, "damage": a.ptl_damage, "move": move_id_str(a.ptl_move),
+            "locked": a.ptl_locked
         }),
         v::LOCKEDMOVE => json!({"time": a.lockedmove_time, "accuracy": a.lockedmove_acc, "move": move_id_str(a.lockedmove_move)}),
         v::TWOTURNMOVE => json!({"move": move_id_str(a.twoturn_move)}),
@@ -111,7 +129,7 @@ pub fn snapshot(b: &Battle) -> Value {
         "lastDamage": b.last_damage,
         "ended": b.ended,
         "winner": match b.winner { 1 => "p1", 2 => "p2", _ => "" },
-        "sides": [side_snap(&b.sides[0]), side_snap(&b.sides[1])],
+        "sides": [side_snap(b, 0), side_snap(b, 1)],
     })
 }
 

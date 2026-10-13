@@ -128,21 +128,26 @@
                   "spe": 0
                 },
                 "lastMove": null,
+                "maybeLocked": false,
+                "moveThisTurn": "",
                 "moves": [
                   [
                     "cut",
                     48,
-                    false
+                    false,
+                    48
                   ],
                   [
                     "razorleaf",
                     40,
-                    false
+                    false,
+                    40
                   ],
                   [
                     "swift",
                     32,
-                    false
+                    false,
+                    32
                   ]
                 ],
                 "slot": 0,
@@ -162,10 +167,12 @@
                   "spe": 124
                 },
                 "transformed": false,
+                "trapped": false,
                 "types": [
                   "Water",
                   "Psychic"
                 ],
+                "volOrder": [],
                 "volatiles": {}
               },
               "lastEnemyMove": null,
@@ -187,7 +194,8 @@
                     32
                   ],
                   "speed": 124,
-                  "status": ""
+                  "status": "",
+                  "subFainted": false
                 }
               ]
             },
@@ -203,26 +211,32 @@
                   "spe": 0
                 },
                 "lastMove": null,
+                "maybeLocked": false,
+                "moveThisTurn": "",
                 "moves": [
                   [
                     "takedown",
                     32,
-                    false
+                    false,
+                    32
                   ],
                   [
                     "megapunch",
                     32,
-                    false
+                    false,
+                    32
                   ],
                   [
                     "toxic",
                     16,
-                    false
+                    false,
+                    16
                   ],
                   [
                     "payday",
                     32,
-                    false
+                    false,
+                    32
                   ]
                 ],
                 "slot": 0,
@@ -242,9 +256,11 @@
                   "spe": 298
                 },
                 "transformed": false,
+                "trapped": false,
                 "types": [
                   "Electric"
                 ],
+                "volOrder": [],
                 "volatiles": {}
               },
               "lastEnemyMove": null,
@@ -267,7 +283,8 @@
                     32
                   ],
                   "speed": 298,
-                  "status": ""
+                  "status": "",
+                  "subFainted": false
                 }
               ]
             }
@@ -348,21 +365,26 @@
                   "spe": 0
                 },
                 "lastMove": "swift",
+                "maybeLocked": false,
+                "moveThisTurn": "",
                 "moves": [
                   [
                     "cut",
                     48,
-                    false
+                    false,
+                    48
                   ],
                   [
                     "razorleaf",
                     40,
-                    false
+                    false,
+                    40
                   ],
                   [
                     "swift",
                     31,
-                    false
+                    false,
+                    32
                   ]
                 ],
                 "slot": 0,
@@ -382,9 +404,13 @@
                   "spe": 124
                 },
                 "transformed": false,
+                "trapped": false,
                 "types": [
                   "Water",
                   "Psychic"
+                ],
+                "volOrder": [
+                  "residualdmg"
                 ],
                 "volatiles": {
                   "residualdmg": {
@@ -411,7 +437,9 @@
                     31
                   ],
                   "speed": 124,
-                  "status": "tox"
+                  "status": "tox",
+                  "statusSelf": false,
+                  "subFainted": false
                 }
               ]
             },
@@ -427,26 +455,32 @@
                   "spe": 0
                 },
                 "lastMove": "toxic",
+                "maybeLocked": false,
+                "moveThisTurn": "",
                 "moves": [
                   [
                     "takedown",
                     32,
-                    false
+                    false,
+                    32
                   ],
                   [
                     "megapunch",
                     32,
-                    false
+                    false,
+                    32
                   ],
                   [
                     "toxic",
                     15,
-                    false
+                    false,
+                    16
                   ],
                   [
                     "payday",
                     32,
-                    false
+                    false,
+                    32
                   ]
                 ],
                 "slot": 0,
@@ -466,9 +500,11 @@
                   "spe": 298
                 },
                 "transformed": false,
+                "trapped": false,
                 "types": [
                   "Electric"
                 ],
+                "volOrder": [],
                 "volatiles": {}
               },
               "lastEnemyMove": "toxic",
@@ -491,7 +527,8 @@
                     32
                   ],
                   "speed": 298,
-                  "status": ""
+                  "status": "",
+                  "subFainted": false
                 }
               ]
             }
@@ -502,9 +539,9 @@
       }
     ],
     "end": {
-      "ended": true,
-      "turn": 5,
-      "winner": "p2"
+      "ended": false,
+      "turn": 2,
+      "winner": ""
     },
     "error": null
   },

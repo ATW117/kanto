@@ -661,11 +661,11 @@ impl Battle {
             }
             if status != 0 {
                 if status == st::SLP && self.sides[t].active.has(v::MUSTRECHARGE) {
-                    if self.set_status(t, st::SLP, p, false) {
+                    if self.set_status(t, st::SLP, p, false, md == Md::Main, s) {
                         self.remove_volatile(t, v::MUSTRECHARGE);
                     }
                 } else if self.sides[t].mon().status == st::NONE {
-                    if self.set_status(t, status, p, false) {
+                    if self.set_status(t, status, p, false, md == Md::Main, s) {
                         let a = &mut self.sides[t].active;
                         if status == st::BRN {
                             a.modified[0] = crate::battle::modify_stat(a.modified[0], 0.5);
@@ -732,7 +732,7 @@ impl Battle {
     }
 
     /// The move's own `onTryHit` (singleEvent on the main moveData).
-    fn move_try_hit<S: Sink>(&mut self, t: Player, _p: Player, m: &Mv, _s: &mut S) -> R {
+    fn move_try_hit<S: Sink>(&mut self, t: Player, _p: Player, m: &Mv, s: &mut S) -> R {
         match m.id {
             mv::DISABLE => {
                 let sd = &self.sides[t];
@@ -757,11 +757,15 @@ impl Battle {
                 }
             }
             mv::SUBSTITUTE => {
+                // `-fail|target|move: Substitute` (and `[weak]`): a null result, so no second
+                // `-fail` from moveHit.
                 if self.sides[t].active.has(v::SUBSTITUTE) {
+                    s.event(Event::Fail);
                     return R::Null;
                 }
                 let m = self.sides[t].mon();
                 if (m.hp as f64) < m.stats[0] as f64 / 4.0 {
+                    s.event(Event::Fail);
                     return R::Null;
                 }
                 R::Undef
@@ -1028,7 +1032,7 @@ impl Battle {
                     return false;
                 }
                 if m.id == mv::REST {
-                    if !self.set_status(p, st::SLP, p, false) {
+                    if !self.set_status(p, st::SLP, p, false, false, s) {
                         return false;
                     }
                     let mm = self.sides[p].mon_mut();
@@ -1070,7 +1074,7 @@ impl Battle {
                 self.cure_status(p);
             }
             if self.sides[p].mon().status == st::TOX {
-                self.set_status(p, st::PSN, source, true);
+                self.set_status(p, st::PSN, source, true, false, _s);
             }
             self.update_speed_one(p);
             for vid in [v::DISABLE, v::CONFUSION, v::MIST, v::FOCUSENERGY, v::LEECHSEED, v::LIGHTSCREEN, v::REFLECT, v::RESIDUALDMG] {

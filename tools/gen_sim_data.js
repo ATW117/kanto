@@ -147,4 +147,21 @@ const metro = d.moves.all().filter(m => (!m.isNonstandard || m.isNonstandard ===
   .sort((a, b) => a.num - b.num).map(m => m.num);
 w('/// Metronome candidates in the order Showdown samples from (sorted by number).');
 w(`pub static METRONOME: [u8; ${metro.length}] = [${metro.join(', ')}];`);
+w('');
+// Showdown's name aliases (data/aliases.ts) that resolve to a Gen 1 species or move, e.g.
+// `hijumpkick` -> `highjumpkick`, `vicegrip` -> `visegrip`: Showdown accepts them in team sets.
+const {Aliases} = require(path.resolve(psDir, 'dist/data/aliases.js'));
+const toID = s => ('' + s).toLowerCase().replace(/[^a-z0-9]+/g, '');
+const aliases = [];
+for (const [alias, target] of Object.entries(Aliases)) {
+  const m = d.moves.get(target);
+  const s = d.species.get(target);
+  if (m.exists && m.num >= 1 && m.num <= 165 && toID(target) === m.id) aliases.push([toID(alias), m.id]);
+  else if (s.exists && s.num >= 1 && s.num <= 151 && !s.forme && toID(target) === s.id) aliases.push([toID(alias), s.id]);
+}
+aliases.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+w('/// Showdown name aliases (ID -> canonical species/move ID) for Gen 1 species and moves.');
+w(`pub static ALIASES: [(&str, &str); ${aliases.length}] = [`);
+for (const [a, t] of aliases) w(`    (${JSON.stringify(a)}, ${JSON.stringify(t)}),`);
+w('];');
 console.log(out.join('\n'));

@@ -844,8 +844,8 @@ impl Battle {
             }
             let sd = &mut self.sides[p];
             sd.active.move_this_turn = 0;
-            sd.active.maybe_disabled = false;
-            sd.active.maybe_locked = false;
+            sd.mon_mut().maybe_disabled = false;
+            sd.mon_mut().maybe_locked = false;
             for i in 0..sd.active.n_slots as usize {
                 sd.slot_mut(i).disabled = false;
             }
@@ -853,7 +853,7 @@ impl Battle {
                 self.disable_move_event(p);
             }
             let sd = &mut self.sides[p];
-            sd.active.trapped = false;
+            sd.mon_mut().trapped = false;
         }
         for sd in self.sides.iter_mut() {
             sd.fainted_this_turn = false;
@@ -965,7 +965,7 @@ impl Battle {
     /// `Pokemon#getSemiLockedMove(restrictData)`.
     pub(crate) fn semi_locked_move(&self, p: Player, restrict: bool) -> Option<u8> {
         let a = &self.sides[p].active;
-        if restrict && a.maybe_locked {
+        if restrict && self.sides[p].mon().maybe_locked {
             return None;
         }
         let mut best: Option<(u16, u8)> = None;
@@ -992,7 +992,7 @@ impl Battle {
         // Side effects first (idempotent): a hard lock traps; otherwise maybeDisabled feeds
         // maybeLocked (Gen 1 never sets maybeDisabled, so the request is unaffected by order).
         let hard = self.locked_move(p).is_some();
-        let a = &mut self.sides[p].active;
+        let a = self.sides[p].mon_mut();
         if hard {
             a.trapped = true;
             a.maybe_disabled = false;
@@ -1010,7 +1010,7 @@ impl Battle {
         let hard = locked.is_some();
         let sd = &self.sides[p];
         if !hard {
-            locked = if sd.active.maybe_locked { None } else { self.semi_locked_move(p, true) };
+            locked = if sd.mon().maybe_locked { None } else { self.semi_locked_move(p, true) };
         }
         let mut moves = [ReqMove { id: 0, disabled: false }; 4];
         let mut n = 0;
@@ -1031,14 +1031,14 @@ impl Battle {
             }
         }
         let status = sd.mon().status;
-        if locked.is_none() && (matches!(status, st::FRZ | st::SLP) || (sd.active.has(v::PARTIALLYTRAPPED) && !sd.active.maybe_locked)) {
+        if locked.is_none() && (matches!(status, st::FRZ | st::SLP) || (sd.active.has(v::PARTIALLYTRAPPED) && !sd.mon().maybe_locked)) {
             moves[0] = ReqMove { id: req::FIGHT, disabled: false };
             n = 1;
         } else if n == 0 {
             moves[0] = ReqMove { id: pm::STRUGGLE, disabled: false };
             n = 1;
         }
-        (moves, n, hard || sd.active.trapped)
+        (moves, n, hard || sd.mon().trapped)
     }
 
     /// Legal choices for `player`, as offered by Showdown's request.

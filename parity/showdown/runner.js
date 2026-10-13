@@ -81,9 +81,15 @@ function traceRng(battle, sink) {
 }
 
 // ---- State snapshot -----------------------------------------------------------------------------
+// Everything the Gen 1 mechanics read is snapshotted, including fields no message shows
+// (statusState.source, subFainted, the bench's modifiedStats, trap partners, moveThisTurn,
+// trapped/maybeLocked) and the insertion order of volatiles, which decides how tied handlers are
+// shuffled. crates/sim-parity/src/snapshot.rs must produce the same structure.
 const VOL_KEYS = ['time', 'startTime', 'duration', 'totalDuration', 'damage', 'hp', 'counter', 'accuracy',
   'slotIndex', 'move', 'maybeLocked'];
-function volSnap(state) {
+// Volatile fields that hold a Pokémon: snapshotted as its original team slot.
+const VOL_MON_KEYS = {partiallytrapped: 'source', fakepartiallytrapped: 'counterpart', partialtrappinglock: 'locked'};
+function volSnap(id, state) {
   const o = {};
   for (const k of VOL_KEYS) {
     let v = state[k];
@@ -91,20 +97,27 @@ function volSnap(state) {
     if (typeof v === 'object') v = v.id;
     o[k] = v;
   }
+  const mk = VOL_MON_KEYS[id];
+  if (mk && state[mk]) o[mk] = state[mk].__orig;
   return o;
 }
 
-function monSnap(p) {
+const STATUSES = new Set(['slp', 'psn', 'brn', 'frz', 'par', 'tox']);
+function monSnap(p, isActive) {
   const o = {hp: p.hp, status: p.status || '', fainted: !!p.fainted, speed: p.speed,
-    pp: p.baseMoveSlots.map(m => m.pp)};
+    pp: p.baseMoveSlots.map(m => m.pp), subFainted: !!p.subFainted};
   if (p.status === 'slp') o.slp = [p.statusState.time, p.statusState.startTime];
+  // Sleep Clause Mod ignores self-inflicted sleep: statusState.source is an ally.
+  if (STATUSES.has(p.status)) o.statusSelf = !!(p.statusState.source && p.statusState.source.isAlly(p));
+  // A benched Pokémon keeps the modified stats its last clearVolatile left (Gen 1 par/brn drops).
+  if (!isActive) o.modified = {...p.modifiedStats};
   return o;
 }
 
 function activeSnap(a) {
   if (!a) return null;
   const vols = {};
-  for (const id of Object.keys(a.volatiles)) vols[id] = volSnap(a.volatiles[id]);
+  for (const id of Object.keys(a.volatiles)) vols[id] = volSnap(id, a.volatiles[id]);
   return {
     slot: a.__orig,
     species: a.species.id,
@@ -112,16 +125,21 @@ function activeSnap(a) {
     boosts: {...a.boosts},
     stats: {...a.modifiedStats},
     stored: {...a.storedStats},
-    moves: a.moveSlots.map(m => [m.id, m.pp, !!m.disabled]),
+    moves: a.moveSlots.map(m => [m.id, m.pp, !!m.disabled, m.maxpp]),
     volatiles: vols,
+    // Insertion order (object keys are compared as sets, so the order is listed separately).
+    volOrder: Object.keys(a.volatiles),
     lastMove: a.lastMove ? a.lastMove.id : null,
+    moveThisTurn: a.moveThisTurn || '',
+    trapped: !!a.trapped,
+    maybeLocked: !!a.maybeLocked,
     transformed: !!a.transformed,
   };
 }
 
 function sideSnap(side) {
   const team = [];
-  for (const p of side.pokemon) team[p.__orig] = monSnap(p);
+  for (const p of side.pokemon) team[p.__orig] = monSnap(p, p === side.active[0]);
   return {
     order: side.pokemon.map(p => p.__orig),
     left: side.pokemonLeft,

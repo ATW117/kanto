@@ -155,26 +155,32 @@
                   "spe": 0
                 },
                 "lastMove": null,
+                "maybeLocked": false,
+                "moveThisTurn": "",
                 "moves": [
                   [
                     "thunderwave",
                     32,
-                    false
+                    false,
+                    32
                   ],
                   [
                     "bide",
                     16,
-                    false
+                    false,
+                    16
                   ],
                   [
                     "flash",
                     32,
-                    false
+                    false,
+                    32
                   ],
                   [
                     "psychic",
                     16,
-                    false
+                    false,
+                    16
                   ]
                 ],
                 "slot": 0,
@@ -194,9 +200,11 @@
                   "spe": 278
                 },
                 "transformed": false,
+                "trapped": false,
                 "types": [
                   "Psychic"
                 ],
+                "volOrder": [],
                 "volatiles": {}
               },
               "lastEnemyMove": null,
@@ -219,7 +227,8 @@
                     16
                   ],
                   "speed": 278,
-                  "status": ""
+                  "status": "",
+                  "subFainted": false
                 }
               ]
             },
@@ -235,26 +244,32 @@
                   "spe": 0
                 },
                 "lastMove": null,
+                "maybeLocked": false,
+                "moveThisTurn": "",
                 "moves": [
                   [
                     "doubleedge",
                     24,
-                    false
+                    false,
+                    24
                   ],
                   [
                     "hornattack",
                     40,
-                    false
+                    false,
+                    40
                   ],
                   [
                     "takedown",
                     32,
-                    false
+                    false,
+                    32
                   ],
                   [
                     "watergun",
                     40,
-                    false
+                    false,
+                    40
                   ]
                 ],
                 "slot": 0,
@@ -274,9 +289,11 @@
                   "spe": 224
                 },
                 "transformed": false,
+                "trapped": false,
                 "types": [
                   "Water"
                 ],
+                "volOrder": [],
                 "volatiles": {}
               },
               "lastEnemyMove": null,
@@ -300,11 +317,19 @@
                     40
                   ],
                   "speed": 224,
-                  "status": ""
+                  "status": "",
+                  "subFainted": false
                 },
                 {
                   "fainted": false,
                   "hp": 283,
+                  "modified": {
+                    "atk": 188,
+                    "def": 228,
+                    "spa": 298,
+                    "spd": 298,
+                    "spe": 278
+                  },
                   "pp": [
                     32,
                     24,
@@ -312,7 +337,8 @@
                     32
                   ],
                   "speed": 278,
-                  "status": ""
+                  "status": "",
+                  "subFainted": false
                 }
               ]
             }
@@ -379,26 +405,32 @@
                   "spe": 0
                 },
                 "lastMove": "bide",
+                "maybeLocked": false,
+                "moveThisTurn": "",
                 "moves": [
                   [
                     "thunderwave",
                     32,
-                    false
+                    false,
+                    32
                   ],
                   [
                     "bide",
                     15,
-                    false
+                    false,
+                    16
                   ],
                   [
                     "flash",
                     32,
-                    false
+                    false,
+                    32
                   ],
                   [
                     "psychic",
                     16,
-                    false
+                    false,
+                    16
                   ]
                 ],
                 "slot": 0,
@@ -418,8 +450,12 @@
                   "spe": 278
                 },
                 "transformed": false,
+                "trapped": false,
                 "types": [
                   "Psychic"
+                ],
+                "volOrder": [
+                  "bide"
                 ],
                 "volatiles": {
                   "bide": {
@@ -448,7 +484,8 @@
                     16
                   ],
                   "speed": 278,
-                  "status": ""
+                  "status": "",
+                  "subFainted": false
                 }
               ]
             },
@@ -464,26 +501,32 @@
                   "spe": 0
                 },
                 "lastMove": null,
+                "maybeLocked": false,
+                "moveThisTurn": "",
                 "moves": [
                   [
                     "takedown",
                     32,
-                    false
+                    false,
+                    32
                   ],
                   [
                     "doubleteam",
                     24,
-                    false
+                    false,
+                    24
                   ],
                   [
                     "thunder",
                     16,
-                    false
+                    false,
+                    16
                   ],
                   [
                     "megapunch",
                     32,
-                    false
+                    false,
+                    32
                   ]
                 ],
                 "slot": 1,
@@ -503,9 +546,11 @@
                   "spe": 278
                 },
                 "transformed": false,
+                "trapped": false,
                 "types": [
                   "Psychic"
                 ],
+                "volOrder": [],
                 "volatiles": {}
               },
               "lastEnemyMove": null,
@@ -522,6 +567,13 @@
                 {
                   "fainted": false,
                   "hp": 293,
+                  "modified": {
+                    "atk": 232,
+                    "def": 218,
+                    "spa": 198,
+                    "spd": 198,
+                    "spe": 224
+                  },
                   "pp": [
                     24,
                     40,
@@ -529,7 +581,8 @@
                     40
                   ],
                   "speed": 224,
-                  "status": ""
+                  "status": "",
+                  "subFainted": false
                 },
                 {
                   "fainted": false,
@@ -541,7 +594,8 @@
                     32
                   ],
                   "speed": 278,
-                  "status": ""
+                  "status": "",
+                  "subFainted": false
                 }
               ]
             }
@@ -552,9 +606,9 @@
       }
     ],
     "end": {
-      "ended": true,
-      "turn": 17,
-      "winner": "p2"
+      "ended": false,
+      "turn": 2,
+      "winner": ""
     },
     "error": null
   },

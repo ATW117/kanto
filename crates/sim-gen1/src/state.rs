@@ -137,6 +137,11 @@ pub struct Mon {
     pub sub_fainted: bool,
     /// Modified stats `[atk, def, spa, spd, spe]` as left by the last `clearVolatile`.
     pub modified: [u16; 5],
+    /// `trapped`, `maybeLocked`, `maybeDisabled`: Pokémon fields that `clearVolatile` does not
+    /// reset (endTurn does, for the actives), so a fainted active keeps them.
+    pub trapped: bool,
+    pub maybe_locked: bool,
+    pub maybe_disabled: bool,
 }
 
 /// Volatile state of the active Pokémon (reset by `clearVolatile`).
@@ -191,9 +196,6 @@ pub struct Active {
     /// `pokemon.lastMove` (0 = null).
     pub last_move: u8,
     pub move_this_turn: u8,
-    pub trapped: bool,
-    pub maybe_locked: bool,
-    pub maybe_disabled: bool,
     pub switch_flag: bool,
 }
 
@@ -238,9 +240,6 @@ impl Default for Active {
             residual_counter: 0,
             last_move: 0,
             move_this_turn: 0,
-            trapped: false,
-            maybe_locked: false,
-            maybe_disabled: false,
             switch_flag: false,
         }
     }

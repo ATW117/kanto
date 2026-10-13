@@ -204,7 +204,9 @@ pub fn replay(spec: &Spec, trace: &Trace) -> Replay {
             trace::stop();
             return diverge(&b, i, Kind::Rng, cat, d, st);
         }
-        let (sd_ev, our_ev) = (log_events(&st.log), sim_events(&events));
+        // A side switches in at most one Pokémon per step: Showdown's is its active after it.
+        let slots = |p: usize, _details: &str| st.state["sides"][p]["active"]["slot"].as_u64().map(|s| s as u8);
+        let (sd_ev, our_ev) = (log_events(&st.log, &slots), sim_events(&events));
         if sd_ev != our_ev {
             let k = sd_ev.iter().zip(&our_ev).position(|(a, b)| a != b).unwrap_or(sd_ev.len().min(our_ev.len()));
             let cat = format!("events: showdown {} ours {}", sd_ev.get(k).map(|s| s.as_str()).unwrap_or("-"), our_ev.get(k).map(|s| s.as_str()).unwrap_or("-"));
@@ -307,9 +309,12 @@ impl Compact {
 
 // ---- Event stream check ---------------------------------------------------------------------
 
-/// Public events from Showdown's log, normalised: `p1 move bodyslam [from]`, `p2 switch`,
-/// `p1 cant slp`.
-fn log_events(log: &[String]) -> Vec<String> {
+/// Public events from Showdown's log, normalised to the [`sim_core::Event`]s the env's reveal
+/// memory consumes (battle_env::reveal), in order:
+/// `p1 move bodyslam [from]`, `p2 switch 3` (original team slot), `p1 cant disable thunderbolt`,
+/// `p1 miss`, `crit`, `supereffective`, `resisted`, `immune`, `fail`, `p2 disable psychic`,
+/// `p1 mimic surf`, `p1 transform`, `p2 faint`, `turn`.
+fn log_events(log: &[String], slots: &dyn Fn(usize, &str) -> Option<u8>) -> Vec<String> {
     let mut out = Vec::new();
     let mut skip = false;
     for l in log {
@@ -322,17 +327,46 @@ fn log_events(log: &[String]) -> Vec<String> {
             continue;
         }
         let parts: Vec<&str> = l.split('|').collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        if parts[1] == "turn" {
+            out.push("turn".into());
+            continue;
+        }
         if parts.len() < 3 {
             continue;
         }
         let who = &parts[2][..2.min(parts[2].len())];
+        let p = if who == "p2" { 1 } else { 0 };
         match parts[1] {
             "move" if parts.len() >= 4 => {
                 let from = parts[4..].iter().any(|x| x.starts_with("[from]"));
                 out.push(format!("{who} move {}{}", sim_data::to_id(parts[3]), if from { " [from]" } else { "" }));
             }
-            "switch" | "drag" => out.push(format!("{who} switch")),
-            "cant" if parts.len() >= 4 => out.push(format!("{who} cant {}", sim_data::to_id(parts[3]))),
+            "switch" | "drag" if parts.len() >= 4 => {
+                // `|switch|p1a: Name|Species, L50|hp`: map the details to the team slot.
+                let slot = slots(p, parts[3]).map(|s| s.to_string()).unwrap_or_else(|| "?".into());
+                out.push(format!("{who} switch {slot}"));
+            }
+            "cant" if parts.len() >= 4 => {
+                let reason = sim_data::to_id(parts[3]);
+                match parts.get(4) {
+                    Some(m) if reason == "disable" => out.push(format!("{who} cant {reason} {}", sim_data::to_id(m))),
+                    _ => out.push(format!("{who} cant {reason}")),
+                }
+            }
+            "-miss" => out.push(format!("{who} miss")),
+            "-crit" => out.push("crit".into()),
+            "-supereffective" => out.push("supereffective".into()),
+            "-resisted" => out.push("resisted".into()),
+            "-immune" => out.push("immune".into()),
+            "-fail" => out.push("fail".into()),
+            "-start" if parts.len() >= 5 && matches!(parts[3], "Disable" | "Mimic") => {
+                out.push(format!("{who} {} {}", sim_data::to_id(parts[3]), sim_data::to_id(parts[4])));
+            }
+            "-transform" => out.push(format!("{who} transform")),
+            "faint" => out.push(format!("{who} faint")),
             _ => {}
         }
     }
@@ -341,15 +375,15 @@ fn log_events(log: &[String]) -> Vec<String> {
 
 fn sim_events(ev: &[sim_core::Event]) -> Vec<String> {
     use sim_core::{Cant, Event};
+    use sim_gen1::state::move_id_str;
     let mut out = Vec::new();
     for e in ev {
-        match *e {
+        out.push(match *e {
             Event::Move { player, mv, from, .. } => {
-                let id = sim_gen1::state::move_id_str(mv);
-                out.push(format!("p{} move {id}{}", player + 1, if from { " [from]" } else { "" }));
+                format!("p{} move {}{}", player + 1, move_id_str(mv), if from { " [from]" } else { "" })
             }
-            Event::Switch { player, .. } => out.push(format!("p{} switch", player + 1)),
-            Event::Cant { player, reason, .. } => {
+            Event::Switch { player, slot } => format!("p{} switch {slot}", player + 1),
+            Event::Cant { player, reason, mv, .. } => {
                 let r = match reason {
                     Cant::Sleep => "slp",
                     Cant::Freeze => "frz",
@@ -359,10 +393,24 @@ fn sim_events(ev: &[sim_core::Event]) -> Vec<String> {
                     Cant::Disable => "disable",
                     Cant::Recharge => "recharge",
                 };
-                out.push(format!("p{} cant {r}", player + 1));
+                if reason == Cant::Disable {
+                    format!("p{} cant {r} {}", player + 1, move_id_str(mv))
+                } else {
+                    format!("p{} cant {r}", player + 1)
+                }
             }
-            _ => {}
-        }
+            Event::Miss { player } => format!("p{} miss", player + 1),
+            Event::Crit => "crit".into(),
+            Event::SuperEffective => "supereffective".into(),
+            Event::Resisted => "resisted".into(),
+            Event::Immune => "immune".into(),
+            Event::Fail => "fail".into(),
+            Event::DisableStart { player, mv, .. } => format!("p{} disable {}", player + 1, move_id_str(mv)),
+            Event::MimicStart { player, mv } => format!("p{} mimic {}", player + 1, move_id_str(mv)),
+            Event::Transform { player } => format!("p{} transform", player + 1),
+            Event::Faint { player, .. } => format!("p{} faint", player + 1),
+            Event::Turn { .. } => "turn".into(),
+        });
     }
     out
 }
