@@ -301,3 +301,143 @@ pub fn diff_pkmn(n: usize, seed: u64, teams: &str, compat: Compat, verbose: bool
     }
     diverged
 }
+
+/// Median of a few samples.
+fn median(mut v: Vec<f64>) -> f64 {
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    v[v.len() / 2]
+}
+
+/// Timing breakdown of the native simulator (single thread, `compat` rules), by ablation:
+/// every game's choices are recorded once, then the same games are replayed
+/// - with updates only (`update` ns per update),
+/// - with updates plus `choices()` for both players at every decision (`choices` = difference),
+/// - and a sample of decision-point states is copied (`Battle` memcpy, the search clone),
+///   serialised (`to_bytes`, the env's `clone_state`) and decoded + validated (`from_bytes`,
+///   `restore_state`).
+///
+/// Each figure is the median of `reps` runs. For a per-function profile use callgrind on
+/// `bench N teams seed native` (only the native games are played).
+pub fn breakdown(n: usize, seed: u64, teams: &str, compat: Compat, reps: usize) {
+    use sim_core::Generation;
+    use std::hint::black_box;
+    let source = TeamSource::from_spec(teams).unwrap_or_else(|e| panic!("{e}"));
+    let gs = games(&source, n, seed);
+    let rules = Rules { compat, ..Rules::OU };
+    let starts: Vec<Battle> = gs.iter().map(|g| sim_backend::new_battle(&g.0, &g.1, g.2, rules)).collect();
+    // Record the choice sequences and a sample of decision-point states.
+    let mut traj: Vec<Vec<(Choice, Choice)>> = Vec::with_capacity(n);
+    let mut sample: Vec<Battle> = Vec::new();
+    let mut turns = 0u64;
+    for (i, g) in gs.iter().enumerate() {
+        let mut b = starts[i];
+        let mut t = Vec::new();
+        let mut rng = Rng::new(g.3);
+        let mut ch = [Choice::Pass; 16];
+        let (mut c1, mut c2) = (Choice::Pass, Choice::Pass);
+        loop {
+            b.apply_choices_unchecked(c1, c2, &mut ());
+            t.push((c1, c2));
+            if t.len() % 16 == 0 && sample.len() < 20_000 {
+                sample.push(b);
+            }
+            if b.ended || b.turn as u32 >= MAX_TURNS {
+                break;
+            }
+            let mut cs = [Choice::Pass; 2];
+            for p in 0..2 {
+                let n = b.choices(p, &mut ch);
+                let mut idx = Idx::new();
+                for i in 0..n {
+                    idx.push((native_action(&b, p, ch[i]).index(), i));
+                }
+                cs[p] = ch[idx.pick(&mut rng)];
+            }
+            c1 = cs[0];
+            c2 = cs[1];
+        }
+        turns += b.turn as u64;
+        traj.push(t);
+    }
+    let updates: usize = traj.iter().map(|t| t.len()).sum();
+    let time = |f: &mut dyn FnMut()| {
+        median(
+            (0..reps)
+                .map(|_| {
+                    let t0 = Instant::now();
+                    f();
+                    t0.elapsed().as_secs_f64()
+                })
+                .collect(),
+        )
+    };
+    let replay = time(&mut || {
+        for (i, t) in traj.iter().enumerate() {
+            let mut b = starts[i];
+            for &(c1, c2) in t {
+                b.apply_choices_unchecked(black_box(c1), black_box(c2), &mut ());
+            }
+            black_box(&b);
+        }
+    });
+    let with_choices = time(&mut || {
+        let mut ch = [Choice::Pass; 16];
+        for (i, t) in traj.iter().enumerate() {
+            let mut b = starts[i];
+            for &(c1, c2) in t {
+                b.apply_choices_unchecked(black_box(c1), black_box(c2), &mut ());
+                for p in 0..2 {
+                    black_box(b.choices(p, &mut ch));
+                    black_box(&ch);
+                }
+            }
+        }
+    });
+    // In-cache copies (a search clones from a hot state): 64 states, many times over.
+    const COPIES: usize = 20_000;
+    let hot = &sample[..64];
+    let copy = time(&mut || {
+        let mut dst = sample[0];
+        for _ in 0..COPIES {
+            for s in hot {
+                dst = black_box(*black_box(s));
+            }
+        }
+        black_box(&dst);
+    });
+    let mut blobs = Vec::with_capacity(sample.len() * sim_gen1::ser::BATTLE_BYTES);
+    let to_bytes = time(&mut || {
+        blobs.clear();
+        for s in &sample {
+            s.to_bytes(&mut blobs);
+        }
+        black_box(&blobs);
+    });
+    let from_bytes = time(&mut || {
+        for c in blobs.chunks(sim_gen1::ser::BATTLE_BYTES) {
+            black_box(Battle::from_bytes(c).expect("valid blob"));
+        }
+    });
+    let ns = |s: f64, k: usize| s * 1e9 / k as f64;
+    println!("== native breakdown ({compat:?}, {n} games, {updates} updates, {turns} turns; median of {reps})");
+    println!("  update only:         {:7.1} ns/update  {:>10.0} turns/s", ns(replay, updates), turns as f64 / replay);
+    println!("  choices (2 players): {:7.1} ns/update  ({:.1} ns/player)", ns(with_choices - replay, updates), ns(with_choices - replay, 2 * updates));
+    println!("  Battle copy:         {:7.1} ns         ({} bytes)", ns(copy, COPIES * hot.len()), std::mem::size_of::<Battle>());
+    println!("  to_bytes:            {:7.1} ns         (clone_state blob, {} bytes)", ns(to_bytes, sample.len()), sim_gen1::ser::BATTLE_BYTES);
+    println!("  from_bytes+validate: {:7.1} ns         (restore_state)", ns(from_bytes, sample.len()));
+}
+
+/// Only the native games (vanilla rules), for profilers.
+pub fn native_only(n: usize, seed: u64, teams: &str) {
+    let source = TeamSource::from_spec(teams).unwrap_or_else(|e| panic!("{e}"));
+    let gs = games(&source, n, seed);
+    let starts: Vec<Battle> = gs.iter().map(|g| sim_backend::new_battle(&g.0, &g.1, g.2, Rules::OU)).collect();
+    let t0 = Instant::now();
+    let mut turns = 0u64;
+    for (i, g) in gs.iter().enumerate() {
+        let mut b = starts[i];
+        turns += play_native(&mut b, g.3, |_| {}).0 as u64;
+    }
+    let secs = t0.elapsed().as_secs_f64();
+    println!("native only: {turns} turns, {:.0} turns/s", turns as f64 / secs);
+}
