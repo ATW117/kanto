@@ -486,7 +486,7 @@ impl Battle {
         if let Some(a) = accuracy {
             const TABLE: [f64; 13] = [25.0, 28.0, 33.0, 40.0, 50.0, 66.0, 100.0, 150.0, 200.0, 250.0, 300.0, 350.0, 400.0];
             let mut acc = (a * 255.0 / 100.0).floor() as i64;
-            let ua = self.sides[p].active;
+            let ua = &self.sides[p].active;
             if ua.has(v::LOCKEDMOVE) {
                 acc = ua.lockedmove_acc as i64;
             }
@@ -872,7 +872,7 @@ impl Battle {
         if m.d.self_volatile == data::vol::PARTIALTRAPPINGLOCK && m.d.type_ == TYPE_NORMAL && self.has_type(t, TYPE_GHOST) {
             return R::N(0);
         }
-        let ua = self.sides[p].active;
+        let ua = &self.sides[p].active;
         if ua.has(v::PARTIALTRAPPINGLOCK) && t != p && self.sides[t].order[0] == ua.ptl_locked {
             return R::N(ua.ptl_damage);
         }
@@ -903,7 +903,7 @@ impl Battle {
         let (ai, di) = if physical { (0usize, 1usize) } else { (2, 3) };
         let mut level = self.sides[p].mon().level as u64;
         let mut attack = ua.modified[ai] as u64;
-        let ta = self.sides[t].active;
+        let ta = &self.sides[t].active;
         let mut defense = ta.modified[di] as u64;
         if (di == 1 && ta.has(v::REFLECT)) || (di == 3 && ta.has(v::LIGHTSCREEN)) {
             defense *= 2;

@@ -27,6 +27,7 @@ fn main() {
     match mode {
         "compare" => bench::bench(n, seed, &teams),
         "breakdown" => {
+            bench::breakdown_pkmn(n, seed, &teams, 5);
             bench::breakdown(n, seed, &teams, sim_gen1::Compat::Vanilla, 5);
             bench::breakdown(n, seed, &teams, sim_gen1::Compat::Pkmn, 5);
         }

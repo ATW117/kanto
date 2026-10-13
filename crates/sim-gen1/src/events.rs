@@ -469,24 +469,25 @@ impl Battle {
         }
         sort_by_key(&mut self.rng, &mut list[..n], "DisableMove.speedSort");
         for &(_, h) in &list[..n] {
-            let a = self.sides[p].active;
+            let a = &self.sides[p].active;
+            let (pt_maybe_locked, ptl_total, ptl_dur, disable_slot, n_slots) = (a.pt_maybe_locked, a.ptl_total, a.ptl_dur, a.disable_slot, a.n_slots);
             let maybe_locked = &mut self.sides[p].mon_mut().maybe_locked;
             match h {
                 100 | v::BIDE => *maybe_locked = false,
                 v::PARTIALLYTRAPPED => {
-                    if a.pt_maybe_locked {
+                    if pt_maybe_locked {
                         *maybe_locked = true;
                     }
                 }
                 v::FAKEPARTIALLYTRAPPED => *maybe_locked = true,
                 v::PARTIALTRAPPINGLOCK => {
-                    if a.ptl_total as i32 - a.ptl_dur as i32 > 1 {
+                    if ptl_total as i32 - ptl_dur as i32 > 1 {
                         *maybe_locked = true;
                     }
                 }
                 v::DISABLE => {
-                    let slot = a.disable_slot as usize;
-                    if (a.n_slots as usize) > slot {
+                    let slot = disable_slot as usize;
+                    if (n_slots as usize) > slot {
                         self.sides[p].slot_mut(slot).disabled = true;
                     }
                 }

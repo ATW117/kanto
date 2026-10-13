@@ -427,6 +427,97 @@ pub fn breakdown(n: usize, seed: u64, teams: &str, compat: Compat, reps: usize) 
     println!("  from_bytes+validate: {:7.1} ns         (restore_state)", ns(from_bytes, sample.len()));
 }
 
+/// The same ablation for pkmn/engine (libpkmn without logging): update only, choices, copy.
+pub fn breakdown_pkmn(n: usize, seed: u64, teams: &str, reps: usize) {
+    use std::hint::black_box;
+    let source = TeamSource::from_spec(teams).unwrap_or_else(|e| panic!("{e}"));
+    let gs = games(&source, n, seed);
+    let starts: Vec<Gen1Battle> = gs.iter().map(|g| Pkmn1::new_battle(&g.0, &g.1, g.2)).collect();
+    let mut traj: Vec<Vec<(u8, u8)>> = Vec::with_capacity(n);
+    let mut sample: Vec<Gen1Battle> = Vec::new();
+    let mut turns = 0u64;
+    for (i, g) in gs.iter().enumerate() {
+        let mut b = starts[i];
+        let mut t = Vec::new();
+        let mut rng = Rng::new(g.3);
+        let mut ch = [0u8; 16];
+        let (mut c1, mut c2) = (0u8, 0u8);
+        loop {
+            let r = unsafe { pkmn_sys::pkmn_gen1_battle_update(&mut b.raw, c1, c2, std::ptr::null_mut()) };
+            b.result = r;
+            t.push((c1, c2));
+            if t.len() % 16 == 0 && sample.len() < 64 {
+                sample.push(b);
+            }
+            if pkmn_sys::bits::result_kind(r) != 0 || Pkmn1::turn(&b) >= MAX_TURNS {
+                break;
+            }
+            let mut cs = [0u8; 2];
+            for p in 0..2 {
+                let n = Pkmn1::choices(&b, p, &mut ch);
+                let mut idx = Idx::new();
+                for i in 0..n {
+                    idx.push((Pkmn1::action_of(&b, p, ch[i]).index(), i));
+                }
+                cs[p] = ch[idx.pick(&mut rng)];
+            }
+            c1 = cs[0];
+            c2 = cs[1];
+        }
+        turns += Pkmn1::turn(&b) as u64;
+        traj.push(t);
+    }
+    let updates: usize = traj.iter().map(|t| t.len()).sum();
+    let time = |f: &mut dyn FnMut()| {
+        median(
+            (0..reps)
+                .map(|_| {
+                    let t0 = Instant::now();
+                    f();
+                    t0.elapsed().as_secs_f64()
+                })
+                .collect(),
+        )
+    };
+    let replay = time(&mut || {
+        for (i, t) in traj.iter().enumerate() {
+            let mut b = starts[i];
+            for &(c1, c2) in t {
+                unsafe { pkmn_sys::pkmn_gen1_battle_update(&mut b.raw, black_box(c1), black_box(c2), std::ptr::null_mut()) };
+            }
+            black_box(&b);
+        }
+    });
+    let with_choices = time(&mut || {
+        let mut ch = [0u8; 16];
+        for (i, t) in traj.iter().enumerate() {
+            let mut b = starts[i];
+            for &(c1, c2) in t {
+                b.result = unsafe { pkmn_sys::pkmn_gen1_battle_update(&mut b.raw, black_box(c1), black_box(c2), std::ptr::null_mut()) };
+                for p in 0..2 {
+                    black_box(Pkmn1::choices(&b, p, &mut ch));
+                    black_box(&ch);
+                }
+            }
+        }
+    });
+    const COPIES: usize = 20_000;
+    let copy = time(&mut || {
+        let mut dst = sample[0];
+        for _ in 0..COPIES {
+            for s in &sample {
+                dst = black_box(*black_box(s));
+            }
+        }
+        black_box(&dst);
+    });
+    let ns = |s: f64, k: usize| s * 1e9 / k as f64;
+    println!("== pkmn/engine breakdown ({n} games, {updates} updates, {turns} turns; median of {reps})");
+    println!("  update only:         {:7.1} ns/update  {:>10.0} turns/s", ns(replay, updates), turns as f64 / replay);
+    println!("  choices (2 players): {:7.1} ns/update  ({:.1} ns/player)", ns(with_choices - replay, updates), ns(with_choices - replay, 2 * updates));
+    println!("  battle copy:         {:7.1} ns         ({} bytes)", ns(copy, COPIES * sample.len()), std::mem::size_of::<Gen1Battle>());
+}
+
 /// Only the native games (vanilla rules), for profilers.
 pub fn native_only(n: usize, seed: u64, teams: &str) {
     let source = TeamSource::from_spec(teams).unwrap_or_else(|e| panic!("{e}"));

@@ -126,6 +126,11 @@ pub struct ReqMove {
     pub disabled: bool,
 }
 
+/// Volatiles with a `LockMove` handler (`getLockedMove`).
+const LOCK_VOLS: u32 = 1 << v::MUSTRECHARGE | 1 << v::LOCKEDMOVE | 1 << v::TWOTURNMOVE | 1 << v::RAGE;
+/// Volatiles that make `getSemiLockedMove` non-null.
+const SEMI_LOCK_VOLS: u32 = 1 << v::PARTIALTRAPPINGLOCK | 1 << v::BIDE;
+
 /// Pseudo entries of request move lists.
 pub mod req {
     pub const RECHARGE: u8 = 250;
@@ -325,9 +330,8 @@ impl Battle {
         match c {
             Choice::Switch(k) => Chosen::Switch(self.sides[p].order[k as usize - 1]),
             Choice::Move(k) => {
-                let (moves, n, _) = self.move_request_data(p);
-                assert!(k >= 1 && (k as usize) <= n, "player {p}: no move {k}");
-                let moveid = moves[k as usize - 1].id;
+                // getMoveRequestData's side effects (already applied by makeRequest; idempotent).
+                self.request_side_effects(p);
                 // chooseMove: locked > Gen 1 'fight' > struggle > the chosen slot.
                 if let Some(l) = self.locked_move(p).or_else(|| self.semi_locked_move(p, false)) {
                     return Chosen::Locked(l);
@@ -339,8 +343,12 @@ impl Battle {
                 if !self.has_valid_move(p) {
                     return Chosen::Struggle;
                 }
-                assert!(!self.sides[p].slot(k as usize - 1).disabled, "player {p}: move {k} is disabled");
-                Chosen::Move { id: moveid, slot: k - 1 }
+                // Not locked, not 'fight', and a usable move exists: the request lists the move
+                // slots, so `move k` is slot k - 1.
+                assert!(k >= 1 && k <= self.sides[p].active.n_slots, "player {p}: no move {k}");
+                let slot = self.sides[p].slot(k as usize - 1);
+                assert!(!slot.disabled, "player {p}: move {k} is disabled");
+                Chosen::Move { id: slot.id, slot: k - 1 }
             }
             Choice::Pass => panic!("player {p} must choose (move request)"),
         }
@@ -806,8 +814,12 @@ impl Battle {
                 continue;
             }
             let q = 1 - p;
+            const TRAPS: u32 = 1 << v::PARTIALTRAPPINGLOCK | 1 << v::PARTIALLYTRAPPED | 1 << v::FAKEPARTIALLYTRAPPED;
+            if self.sides[p].active.vols & TRAPS == 0 {
+                continue;
+            }
             let foe_slot = self.sides[q].active_slot();
-            let a = self.sides[p].active;
+            let a = TrapState::of(&self.sides[p].active);
             let foe_has = |b: &Battle, slot: u8, vol: u8| -> bool {
                 // A Pokémon that is not active has had its volatiles cleared.
                 slot as usize == foe_slot && b.sides[q].mons[slot as usize].hp > 0 && b.sides[q].active.has(vol)
@@ -863,7 +875,7 @@ impl Battle {
         for p in 0..2 {
             if self.sides[p].left > 0 {
                 self.sides[p].request = Request::Move;
-                self.move_request_data(p);
+                self.request_side_effects(p);
             } else {
                 self.sides[p].request = Request::Wait;
             }
@@ -872,21 +884,26 @@ impl Battle {
 
     /// Gen 1 Endless Battle Clause check (`maybeTriggerEndlessBattleClause`).
     fn endless_battle_check(&mut self) -> bool {
+        // (The foe-wide conditions are pure, so they are evaluated only when needed.)
         let stuck = (0..2).all(|p| {
             let q = 1 - p;
-            let foe_all_ghosts = (0..self.sides[q].n as usize).all(|i| {
-                let m = &self.sides[q].mons[i];
-                m.fainted || self.mon_types(q, i).contains(&7)
-            });
-            let foe_all_transform = (0..self.sides[q].n as usize).all(|i| {
-                self.sides[q].mons[i].fainted || self.mon_move_ids(q, i).iter().all(|&m| m == data::mv::TRANSFORM)
-            });
+            let foe_all_ghosts = || {
+                (0..self.sides[q].n as usize).all(|i| {
+                    let m = &self.sides[q].mons[i];
+                    m.fainted || self.mon_types(q, i).contains(&7)
+                })
+            };
+            let foe_all_transform = || {
+                (0..self.sides[q].n as usize).all(|i| {
+                    self.sides[q].mons[i].fainted || self.mon_move_ids(q, i).iter().all(|&m| m == data::mv::TRANSFORM)
+                })
+            };
             (0..self.sides[p].n as usize).all(|i| {
                 let m = &self.sides[p].mons[i];
                 m.fainted
                     || m.status == st::FRZ
-                    || (self.mon_move_ids(p, i).iter().all(|&mv| mv == data::mv::TRANSFORM) && foe_all_transform)
-                    || (self.mon_move_pps(p, i).iter().all(|&pp| pp == 0) && foe_all_ghosts)
+                    || (self.mon_move_ids(p, i).iter().all(|&mv| mv == data::mv::TRANSFORM) && foe_all_transform())
+                    || (self.mon_move_pps(p, i).iter().all(|&pp| pp == 0) && foe_all_ghosts())
             })
         });
         if stuck {
@@ -939,8 +956,12 @@ impl Battle {
     // ---- Requests ----------------------------------------------------------------------------
 
     /// `Pokemon#getLockedMove` (LockMove handlers in volatile insertion order).
+    #[inline]
     pub(crate) fn locked_move(&self, p: Player) -> Option<u8> {
         let a = &self.sides[p].active;
+        if a.vols & LOCK_VOLS == 0 {
+            return None;
+        }
         let mut best: Option<(u16, u8)> = None;
         for (vol, val) in [
             (v::MUSTRECHARGE, req::RECHARGE),
@@ -956,9 +977,10 @@ impl Battle {
     }
 
     /// `Pokemon#getSemiLockedMove(restrictData)`.
+    #[inline]
     pub(crate) fn semi_locked_move(&self, p: Player, restrict: bool) -> Option<u8> {
         let a = &self.sides[p].active;
-        if restrict && self.sides[p].mon().maybe_locked {
+        if a.vols & SEMI_LOCK_VOLS == 0 || (restrict && self.sides[p].mon().maybe_locked) {
             return None;
         }
         let mut best: Option<(u16, u8)> = None;
@@ -979,11 +1001,11 @@ impl Battle {
         })
     }
 
-    /// `Pokemon#getMoveRequestData` for the active Pokémon: applies its side effects (trapped,
-    /// maybeLocked) and returns the request's move list and whether it is `trapped`.
-    pub(crate) fn move_request_data(&mut self, p: Player) -> ([ReqMove; 4], usize, bool) {
-        // Side effects first (idempotent): a hard lock traps; otherwise maybeDisabled feeds
-        // maybeLocked (Gen 1 never sets maybeDisabled, so the request is unaffected by order).
+    /// The side effects of `Pokemon#getMoveRequestData` for the active Pokémon (trapped,
+    /// maybeLocked); [`Battle::request_moves`] gives the request itself.
+    pub(crate) fn request_side_effects(&mut self, p: Player) {
+        // Idempotent: a hard lock traps; otherwise maybeDisabled feeds maybeLocked (Gen 1 never
+        // sets maybeDisabled, so the request is unaffected by order).
         let hard = self.locked_move(p).is_some();
         let a = self.sides[p].mon_mut();
         if hard {
@@ -993,7 +1015,6 @@ impl Battle {
         } else {
             a.maybe_locked = a.maybe_locked || a.maybe_disabled;
         }
-        self.request_moves(p)
     }
 
     /// The request's move list and `trapped` flag for the current state (pure; equal to
@@ -1069,6 +1090,26 @@ impl Battle {
             _ => {}
         }
         n
+    }
+}
+
+/// The trap volatiles of an active Pokémon (what `endTurn` checks), copied out of [`Active`].
+struct TrapState {
+    vols: u32,
+    ptl_locked: u8,
+    pt_source: u8,
+    fpt_counterpart: u8,
+}
+
+impl TrapState {
+    #[inline]
+    fn of(a: &Active) -> TrapState {
+        TrapState { vols: a.vols, ptl_locked: a.ptl_locked, pt_source: a.pt_source, fpt_counterpart: a.fpt_counterpart }
+    }
+
+    #[inline]
+    fn has(&self, id: u8) -> bool {
+        self.vols & (1 << id) != 0
     }
 }
 
