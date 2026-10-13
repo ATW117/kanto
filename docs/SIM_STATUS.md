@@ -32,6 +32,20 @@ See docs/SIM_DESIGN.md.
 | v9 (1009) | gen1nc | pkmn | targeted | 1,000 | 66,823 | 0 |
 | **total** | | | | **14,500** | **1,073,858** | **0 (0.00%)** |
 
+After the performance pass (state layout and hot-path rewrite), with fresh seeds:
+
+| Run (seed) | format | patch | teams | battles | steps compared | diverged |
+| --- | --- | --- | --- | ---: | ---: | ---: |
+| p1 (11001) | gen1ou | vanilla | mixed, Gen 5 + sodium seeds | 10,000 | 764,759 | 0 |
+| p2 (11002) | gen1ou | vanilla | targeted, Gen 5 + sodium seeds | 3,000 | 189,234 | 0 |
+| p3 (11003) | gen1ou | vanilla | thaw | 1,000 | 15,559 | 0 |
+| p4 (11004) | gen1ou | pkmn | mixed | 2,000 | 150,954 | 0 |
+| p5 (11005) | gen1nc | pkmn | targeted | 1,000 | 68,607 | 0 |
+
+The five mutation-testing corpora (5,799 battles) and the fixtures also replay without a
+divergence, and every intermediate step of the pass was checked with 2,000 mixed + 1,000
+targeted + 300 thaw battles on new seeds.
+
 Coverage in those matched steps:
 
 - Events: `-fail` 104k, `-miss` 89k, `-immune` 81k, `faint` 74k, `-crit` 59k, `cant slp` 25k,
@@ -89,6 +103,16 @@ It also runs the fixtures. The cells give the number of divergent battles per co
 | the audit's mutants caught (47 re-run; `dmg-roll-minus1`, a near-duplicate of `dmg-roll-div256`, dropped) | 37 / 47 | **41 / 47** |
 | all mutants (plus 5 new ones for hidden state and events, all caught) | – | **46 / 52** |
 | survivors | 10 | 6, all argued equivalent (no Gen 1 state tells them apart) |
+
+**Performance pass (2026-10-13).** Every mutant pattern was moved to the rewritten code (the two
+`maxpp` mutants now target `Side::slot_maxpp`, which derives the no-longer-stored value), and 10
+mutants of the new fast paths, packed sort keys and packed state were added. Result: **55 / 62**.
+The original 52 give the same 46 / 52 with the same 6 equivalent survivors; 9 of the 10 new ones
+are caught (BeforeMove/AfterMoveSelf/Residual/lock masks and fast paths, the eachEvent shortcut,
+the two-item sort, the packed priority key, the bench burn bit). The survivor,
+`stamp-renumber-reversed`, needs 255 volatile insertions within one switch-in, which no recorded
+corpus reaches; the sim-gen1 unit test `volatile_insertion_order_survives_stamp_renumbering`
+(insertion order vs a model over 20,000 adds/deletes) fails on it.
 
 What changed:
 
@@ -245,19 +269,40 @@ actions from the intersection of both legal sets.
 
 ## Speed
 
-Run `cargo run --release -p sim-backend --example bench -- 20000 <teams>`. Each engine plays
-20,000 games single-threaded on this DGX Spark core (aarch64). Both engines use the same seeds and
-the same uniform-random action policy. No logging, observations or masks are produced.
+Run `cargo run --release -p sim-backend --example bench -- 20000 <teams> [seed] [compare|breakdown]`.
+Each engine plays 20,000 games single-threaded on one DGX Spark core (aarch64, `taskset -c 5`,
+machine load 1-3 from other users; medians of 5 runs). Both engines use the same seeds and the
+same uniform-random action policy. No logging, observations or masks are produced. "Before" is
+commit 71bc099 (before the performance pass), measured with the same driver.
 
-| Engine | randbats turns/s | gen1ou pool turns/s |
-| --- | ---: | ---: |
-| pkmn/engine (libpkmn `-Dshowdown`, no log) | 6.29 M | 6.50 M |
-| native, vanilla Showdown | 2.59 M | 2.57 M |
-| native, pkmn-patched | 2.64 M | 2.66 M |
+| | before | after | pkmn/engine |
+| --- | ---: | ---: | ---: |
+| randbats turns/s (vanilla) | 2.62 M (0.40×) | 4.88 M (0.76×) | 6.45 M |
+| gen1ou pool turns/s (vanilla / pkmn-patched) | 2.57 / 2.66 M | 4.99 / 5.05 M (0.75×) | 6.67 M |
+| update only (ns/update, recorded choices) | 259 | 107-112 | 69 |
+| `choices()` for both players (ns/update) | 24 | 25 | 16 |
+| state size (bytes) | 1,400 | 760 | 384 |
+| state copy, in cache (ns) | 32 | 18 | 12 |
+| `to_bytes` / `from_bytes` + validate (ns) | 607 / 1,106 | 455 / 693 | (memcpy, unvalidated) |
+| `VecEnv.step`, N=4096, 16 threads (env-steps/s) | 2.31 M | 2.53 M | 2.49-2.53 M |
 
-Native runs at about 0.4× pkmn/engine and about 570× Showdown (~4.5k turns/s). The battle state
-is 1,360 bytes against pkmn's 384. Shrinking the state and avoiding per-event volatile scans are
-the obvious next optimisations.
+The turns/s figures include the benchmark's own policy (listing choices, mapping them to env
+actions, sampling), about 50 ns per update for either engine. At the env level the simulator is
+no longer the bottleneck: one `VecEnv.step` costs about 6 µs per env per thread, mostly the
+observation encoding, so native and pkmn/engine are within noise of each other.
+
+What helped (cumulative, randbats turns/s): packed `u64` sort keys, 8-byte queue actions, masked
+volatile iteration and the two-item `speedSort` (2.61 → 3.40 M); cheaper requests and no `Active`
+copies (→ 3.60 M); returning early from events with no handlers, borrowing `MoveData` and a move
+flag table (→ 4.45 M); clamped/masked side and active-slot indexing, which removes bounds checks
+and their panic paths (→ 4.70 M); smaller fixes to the request list, the Endless Battle Clause
+check and the queue (→ 4.88 M). Shrinking the state (1,400 → 760 bytes) roughly halved the copy
+cost but did not change turns/s measurably. Build settings did not help: fat LTO, `panic = "abort"`
+(not usable anyway: `VecEnv` relies on `catch_unwind`) and `-C target-cpu=native` were all within
+noise (±1-2%); `codegen-units = 1` was already set.
+
+`... bench -- N teams seed native` plays only the native games, for
+`valgrind --tool=callgrind` (perf is not available on this machine).
 
 ## Mechanics
 

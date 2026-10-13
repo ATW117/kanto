@@ -108,6 +108,17 @@ MUTANTS = [
     # -- public events (the env's reveal memory)
     ("sub-fail-event-dropped", G + "moves.rs", "if self.sides[t].active.has(v::SUBSTITUTE) {\n                    s.event(Event::Fail);", "if self.sides[t].active.has(v::SUBSTITUTE) {", "event, new"),
     ("status-immune-event-dropped", G + "events.rs", "if status_move {\n                    s.event(Event::Immune);\n                }", "", "event, new"),
+    # -- performance pass: fast paths, packed keys and packed state (each one-place edit)
+    ("fast-beforemove-no-confusion", G + "moves.rs", "    | 1 << v::CONFUSION\n", "\n", "BeforeMove volatile mask"),
+    ("fast-beforemove-skips-par", G + "moves.rs", "st::FRZ | st::SLP | st::PAR) && self.sides[p].active.vols & BEFORE_MOVE_VOLS == 0", "st::FRZ | st::SLP) && self.sides[p].active.vols & BEFORE_MOVE_VOLS == 0", "BeforeMove fast path"),
+    ("fast-aftermoveself-skips-slp", G + "events.rs", "st::SLP | st::PSN | st::BRN | st::TOX) && self.sides[p].active.vols & VOLS == 0", "st::PSN | st::BRN | st::TOX) && self.sides[p].active.vols & VOLS == 0", "AfterMoveSelf fast path"),
+    ("fast-residual-no-flinch", G + "events.rs", "const DURATION_VOLS: u32 = 1 << v::FLINCH | ", "const DURATION_VOLS: u32 = ", "Residual volatile mask"),
+    ("fast-lock-no-rage", G + "battle.rs", "1 << v::TWOTURNMOVE | 1 << v::RAGE;", "1 << v::TWOTURNMOVE;", "getLockedMove fast path"),
+    ("fast-eachevent-inverted", G + "battle.rs", "self.sides[0].active.speed != self.sides[1].active.speed {", "self.sides[0].active.speed == self.sides[1].active.speed {", "eachEvent fast path"),
+    ("sort2-no-swap", C + "sort.rs", "if delta > 0 {\n            list.swap(0, 1);", "if delta > 0 && false {\n            list.swap(0, 1);", "two-item speedSort"),
+    ("key-priority-inverted", C + "sort.rs", "((127 - priority as i16) as u64) << 40", "((priority as i16 + 128) as u64) << 40", "packed sort key"),
+    ("stamp-renumber-reversed", G + "events.rs", "a.vstamp[id as usize] = k as u8;", "a.vstamp[id as usize] = (n - 1 - k) as u8;", "8-bit insertion stamps; renumbering needs 255 volatile adds in one switch-in, which no corpus reaches: covered by the sim-gen1 unit test volatile_insertion_order_survives_stamp_renumbering"),
+    ("bench-brn-not-reapplied", G + "battle.rs", "m.set_bench_brn(m.status == st::BRN);", "m.set_bench_brn(false);", "packed bench stats"),
     ("disable-event-wrong-move", G + "moves.rs", "s.event(Event::DisableStart { player: t, slot: self.sides[t].order[0], mv: a.disable_move });", "s.event(Event::DisableStart { player: t, slot: self.sides[t].order[0], mv: a.disable_slot });", "event, new"),
 ]
 

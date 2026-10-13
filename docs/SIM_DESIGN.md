@@ -29,24 +29,55 @@ parity/fixtures     Node-free regression corpora + harness-sensitivity fixtures
 
 ### State
 
-`sim_gen1::Battle` is a plain `Copy` struct of about 1.4 KB. Clone is a memcpy, and the hot path
-does not allocate. The PRNG is stored inside the battle. The layout follows Showdown's objects, so
-each field Showdown reads has exactly one home:
+`sim_gen1::Battle` is a plain `Copy` struct of 760 bytes. Clone is a memcpy (about 18 ns), and the
+hot path does not allocate. The PRNG is stored inside the battle. The layout follows Showdown's
+objects, so each field Showdown reads has exactly one home:
 
-- `Mon`: a team member as it persists on the bench, indexed by original team slot. It holds HP,
-  status and sleep counters, base move slots, Showdown's cached `speed` sort key, `fainted`,
-  `subFainted`, and the modified stats left by the last `clearVolatile`. It also holds `trapped`,
-  `maybeLocked` and `maybeDisabled`: they are `Pokemon` fields that `clearVolatile` does not reset
-  (only `endTurn` does, for the actives), so a fainted active keeps them.
+- `Mon` (32 bytes): a team member as it persists on the bench, indexed by original team slot. It
+  holds HP, the six stats, status and sleep counters, and the base move slots (2 bytes each: id,
+  6-bit PP, `disabled` bit). One flags word holds `fainted`, `subFainted`, the self-inflicted-sleep
+  bit, and `trapped`, `maybeLocked` and `maybeDisabled`: they are `Pokemon` fields that
+  `clearVolatile` does not reset (only `endTurn` does, for the actives), so a fainted active keeps
+  them. Some Showdown fields are derived instead of stored:
+  - the modified stats a benched Pokémon keeps are its stats with the paralysis/burn drops the
+    last `clearVolatile` re-applied (two flag bits record which);
+  - Showdown's cached `speed` of a benched Pokémon is always its Speed stat (`clearVolatile` sets
+    it), so only the active's is stored, in `Active`;
+  - `maxpp` is never read by Gen 1 mechanics; `Side::slot_maxpp` derives it (3 PP Ups, none for a
+    Mimic/Transform copy in a slot beyond the Pokémon's own set) for the parity snapshot;
+  - of the set's IVs/EVs only the Speed DV/EV are kept: Transform recomputes Speed from the
+    user's set and the target's species. Blob validation checks every other stat is attainable.
 - `Active`: everything `clearVolatile` resets. That includes boosts, modified/stored stats,
-  types, Transform/Mimic move slots, a volatile bitset with per-volatile data, and an insertion
-  stamp per volatile. Showdown iterates volatiles in insertion order, and that order decides how
-  tied handlers are shuffled.
+  types, `speed`, Transform/Mimic move slots, a volatile bitset with per-volatile data, and an
+  8-bit insertion stamp per volatile. Showdown iterates volatiles in insertion order, and that
+  order decides how tied handlers are shuffled. When the stamp counter runs out, the present
+  volatiles are renumbered in order (a unit test checks the order against a model across
+  renumbering).
 - `Side`: `side.pokemon` order, `pokemonLeft`, and Gen 1 move-selection memory:
   `lastSelectedMove`, `lastEnemySelectedMove`, `lastSelectedMoveSlot`, `lastMove`,
   `lastEnemyMove`.
-- `Battle`: `lastDamage`, the turn, a fixed-capacity action queue, the faint queue, rules
-  (clauses, compat mode), and the winner.
+- `Battle`: `lastDamage`, the turn, a fixed-capacity action queue (8-byte actions), the faint
+  queue, rules (clauses, compat mode), and the winner.
+
+### Hot path
+
+The update path is written so that the common turn does little beyond what Showdown's PRNG calls
+require (single-threaded: about 110 ns per update, see docs/SIM_STATUS.md):
+
+- An event whose handler list would be empty (no status and no volatile with a handler for it)
+  returns before building or sorting anything; the lists that are built only contain the
+  volatiles with a handler (masked bitset, in insertion order).
+- `speed_sort` unrolls the two-item case (same swaps, same PRNG calls), and sort keys are packed
+  into a `u64` whose integer order is `comparePriority`'s (tested against it).
+- `eachEvent('Update'/'BeforeTurn')` returns at once when the actives' speeds differ.
+- No per-move copies of `MoveData`; per-move flags come from a const table.
+- Side and active-Pokémon accesses carry no bounds checks: the player index is masked to 0/1 (the
+  public entry points check it) and the active slot is clamped to the team size (a no-op for
+  valid states, which `validate` guarantees for blobs). This is safe code; there is no `unsafe`.
+
+`cargo run --release -p sim-backend --example bench -- 20000 randbats 1 breakdown` prints the
+time per update, per `choices()` call, per state copy and per blob encode/decode, for both
+engines; the `native` mode plays only the native games, for `valgrind --tool=callgrind`.
 
 ### Mechanics: plain Rust, but Showdown's ordering
 
@@ -110,8 +141,9 @@ action under a speed tie does too.
   it only passes choices from its masks; so does the parity replay.
 - **States.** `Battle::from_bytes` decodes a blob and then runs `Battle::validate`, which checks
   every id, count and cross-field invariant. Examples: species/move ids, `n_moves`/`n_slots` 1-4,
-  status ≤ 7, `order` a permutation, HP ≤ max HP, stats equal to those computed from the stored
-  set, boosts in -6..=6, volatile bits and counters in range, trap-partner slots, `pokemonLeft`
+  status ≤ 7, `order` a permutation, HP ≤ max HP, Speed equal to the one computed from the stored
+  Speed DV/EV and every other stat attainable for the species and level, flag bits in range,
+  boosts in -6..=6, volatile bits and counters in range, trap-partner slots, `pokemonLeft`
   equal to the live count, and a decision point (empty queue, faints processed). A blob that fails
   is rejected. Fuzz tests (sim-gen1 `tests/robustness.rs`, sim-backend `tests/native.rs`) corrupt
   random bytes of real mid-game blobs: every one is either rejected or steps without panicking.
