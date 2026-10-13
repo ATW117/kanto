@@ -124,6 +124,33 @@ impl Memory {
     pub fn n_moves(&self, idx: u8) -> usize {
         self.moves[idx as usize].iter().take_while(|&&m| m != 0).count()
     }
+
+    /// Structural invariants (checked when restoring `clone_state` blobs): the reveal order and
+    /// its inverse agree, ids are in range, and counters are in their encoded ranges.
+    pub fn is_valid(&self) -> bool {
+        let n = self.n_revealed as usize;
+        if n > 6 {
+            return false;
+        }
+        for j in 0..6 {
+            let idx = self.reveal_order[j];
+            if j < n {
+                if idx >= 6 || self.slot_of[idx as usize] != j as u8 {
+                    return false;
+                }
+            } else if idx != UNREVEALED {
+                return false;
+            }
+            let s = self.slot_of[j];
+            if s != UNREVEALED && (s as usize >= n || self.reveal_order[s as usize] != j as u8) {
+                return false;
+            }
+        }
+        let ids_ok = self.moves.iter().flatten().all(|&m| m <= 165)
+            && self.track.iter().all(|t| t.mimic_move <= 165)
+            && self.last.iter().all(|e| e.mv <= 165 && e.cant as usize <= crate::protocol::cant::COUNT);
+        ids_ok
+    }
 }
 
 #[cfg(test)]

@@ -15,10 +15,17 @@ fn index(names: &'static [&'static str]) -> HashMap<String, u8> {
     names.iter().enumerate().skip(1).map(|(i, n)| (to_id(n), i as u8)).collect()
 }
 
-/// Species id (1..=151) for a Showdown-spelled name.
+/// Species id (1..=151) for a Showdown-spelled name. The in-game spellings "Nidoran♀" and
+/// "Nidoran♂" are accepted as aliases of Showdown's "Nidoran-F" / "Nidoran-M".
 pub fn species_id(name: &str) -> Option<u8> {
     static MAP: OnceLock<HashMap<String, u8>> = OnceLock::new();
-    MAP.get_or_init(|| index(&SPECIES_NAMES)).get(&to_id(name)).copied()
+    let name = name.replace('♀', "F").replace('♂', "M");
+    MAP.get_or_init(|| index(&SPECIES_NAMES)).get(&to_id(&name)).copied()
+}
+
+/// Whether `species` can learn `move_id` in Gen 1 (union over its evolution chain).
+pub fn can_learn(species: u8, move_id: u8) -> bool {
+    LEARNSETS_ALL.get(species as usize).is_some_and(|l| l.contains(&move_id))
 }
 
 /// Move id (1..=165) for a Showdown-spelled name.
@@ -68,6 +75,12 @@ mod tests {
     fn lookups() {
         assert_eq!(species_id("Tauros"), Some(128));
         assert_eq!(species_id("Mr. Mime"), species_id("mrmime"));
+        assert_eq!(species_id("Nidoran♀"), species_id("Nidoran-F"));
+        assert_eq!(species_id("Nidoran♂"), species_id("Nidoran-M"));
+        assert_ne!(species_id("Nidoran♀"), species_id("Nidoran♂"));
+        assert_eq!(species_id("Nidoran"), None);
+        assert!(can_learn(species_id("Ditto").unwrap(), move_id("Transform").unwrap()));
+        assert!(!can_learn(species_id("Tauros").unwrap(), move_id("Spore").unwrap()));
         assert_eq!(move_id("Body Slam"), Some(34));
         assert_eq!(MOVE_NAMES[move_id("Thunder Wave").unwrap() as usize], "Thunder Wave");
         assert_eq!(effectiveness(4, 11, 11), 200); // Ground vs Electric

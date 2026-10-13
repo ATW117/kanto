@@ -31,8 +31,16 @@ pub fn team_specs(t: &Team) -> Vec<MonSpec> {
 }
 
 /// A native battle from battle-env teams and a 64-bit Gen 5 seed.
-pub fn new_battle(p1: &Team, p2: &Team, seed: u64, rules: Rules) -> Battle {
+///
+/// battle-env teams are validated when they are built (`Team::from_spec`, the random
+/// generators), so this only fails for a hand-built `Team` with out-of-range ids.
+pub fn try_new_battle(p1: &Team, p2: &Team, seed: u64, rules: Rules) -> Result<Battle, sim_gen1::TeamError> {
     Battle::new(&team_specs(p1), &team_specs(p2), Prng::from_u64(seed), rules)
+}
+
+/// [`try_new_battle`] for validated teams (panics with the reason otherwise).
+pub fn new_battle(p1: &Team, p2: &Team, seed: u64, rules: Rules) -> Battle {
+    try_new_battle(p1, p2, seed, rules).unwrap_or_else(|e| panic!("invalid team for the native simulator: {e}"))
 }
 
 struct Reveal<'a>(&'a Battle);
@@ -228,10 +236,23 @@ macro_rules! native_backend {
                 }
             }
 
+            fn choice_move(b: &Battle, player: usize, c: Choice) -> u8 {
+                let Choice::Move(k) = c else { return 0 };
+                if b.sides[player].request != sim_core::Request::Move {
+                    return 0;
+                }
+                let (moves, n, _) = b.request_moves(player);
+                // Request entries are real moves, Struggle, or the Recharge/"Fight" pseudo moves.
+                match (k as usize).checked_sub(1).and_then(|i| moves.get(i)) {
+                    Some(m) if (k as usize) <= n && (1..=165).contains(&m.id) => m.id,
+                    _ => 0,
+                }
+            }
+
             fn update(b: &mut Battle, c1: Choice, c2: Choice, mem: &mut [Memory; 2]) -> Outcome {
                 let mut buf = EventBuf::default();
                 let turn_before = b.turn;
-                b.apply_choices(c1, c2, &mut buf);
+                b.apply_choices_unchecked(c1, c2, &mut buf);
                 reveal::apply_events(&Reveal(b), buf.as_slice().iter().filter_map(map_event), mem);
                 if b.started {
                     reveal::update_trackers(&track_flags(b), b.turn > turn_before && turn_before > 0, mem);

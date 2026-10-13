@@ -40,6 +40,8 @@ struct Bufs {
     truncated: Vec<bool>,
     outcome: Vec<i8>,
     turns: Vec<u32>,
+    opp_action: Vec<i16>,
+    error: Vec<bool>,
 }
 
 impl Bufs {
@@ -52,6 +54,8 @@ impl Bufs {
             truncated: vec![false; n],
             outcome: vec![0; n],
             turns: vec![0; n],
+            opp_action: vec![0; 2 * n],
+            error: vec![false; n],
         }
     }
     fn out(&mut self) -> StepOut<'_> {
@@ -63,6 +67,8 @@ impl Bufs {
             truncated: &mut self.truncated,
             outcome: &mut self.outcome,
             turns: &mut self.turns,
+            opp_action: &mut self.opp_action,
+            error: &mut self.error,
         }
     }
 }
@@ -240,6 +246,7 @@ fn illegal_actions_rejected_without_side_effects() {
     let mut acts = vec![0i16; 8];
     acts[5] = 99;
     let err = v.step(&acts, b.out()).unwrap_err();
+    let battle_env::StepError::Illegal(err) = err else { panic!("expected an illegal-action error") };
     assert_eq!((err.env, err.player), (2, 1));
     for i in 0..4 {
         assert_eq!(v.clone_state(i), before[i]);
@@ -439,6 +446,7 @@ fn cross_check_against_c_driver() {
             table: [[0; NUM_ACTIONS]; 2],
             mask: [[false; NUM_ACTIONS]; 2],
             steps: 0,
+            inject_panic: false,
         };
         let mut psrng = pkmn_sys::pkmn_psrng::default();
         unsafe { pkmn_sys::pkmn_psrng_init(&mut psrng, seed) };

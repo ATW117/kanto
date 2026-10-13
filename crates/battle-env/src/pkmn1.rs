@@ -225,6 +225,28 @@ impl Backend for Pkmn1 {
         }
     }
 
+    fn choice_move(b: &Gen1Battle, player: usize, c: u8) -> u8 {
+        if bits::choice_kind(c) != pkmn_sys::PKMN_CHOICE_MOVE {
+            return 0;
+        }
+        let data = bits::choice_data(c);
+        if data == 0 {
+            return 165; // Struggle
+        }
+        // Showdown mode encodes forced turns as `move 1`: name no move while locked in.
+        let view = Self::view(b);
+        let a = &view.sides[player].active;
+        let locked = crate::obs::vol::RECHARGING
+            | crate::obs::vol::THRASHING
+            | crate::obs::vol::CHARGING
+            | crate::obs::vol::BIDE
+            | crate::obs::vol::BINDING;
+        if a.volatiles & locked != 0 {
+            return 0;
+        }
+        a.moves.get(data as usize - 1).copied().unwrap_or(0) // data >= 1 here
+    }
+
     #[inline]
     fn update(b: &mut Gen1Battle, c1: u8, c2: u8, mem: &mut [Memory; 2]) -> Outcome {
         let mut buf = [0u8; LOG_BUF];

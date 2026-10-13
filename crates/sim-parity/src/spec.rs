@@ -85,14 +85,17 @@ impl Spec {
         r
     }
 
-    pub fn prng(&self) -> Prng {
-        Prng::parse(&self.seed).expect("bad seed")
-    }
-
     pub fn teams(&self) -> Result<(Vec<MonSpec>, Vec<MonSpec>), String> {
         let a = self.p1.iter().map(|s| s.to_mon()).collect::<Result<Vec<_>, _>>()?;
         let b = self.p2.iter().map(|s| s.to_mon()).collect::<Result<Vec<_>, _>>()?;
         Ok((a, b))
+    }
+
+    /// The native battle for this spec (not started).
+    pub fn battle(&self) -> Result<sim_gen1::Battle, String> {
+        let (t1, t2) = self.teams()?;
+        let prng = Prng::parse(&self.seed).ok_or_else(|| format!("bad seed '{}'", self.seed))?;
+        sim_gen1::Battle::new(&t1, &t2, prng, self.rules()).map_err(|e| e.to_string())
     }
 }
 

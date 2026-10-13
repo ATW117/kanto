@@ -12,8 +12,8 @@ mod moves;
 pub mod ser;
 pub mod state;
 
-pub use battle::{calc_pp, calc_stats, req, MonSpec, ReqMove};
-pub use sim_core::{Choice, Event, Outcome, Player, Prng, Request, Sink};
+pub use battle::{calc_pp, calc_stats, req, MonSpec, ReqMove, TeamError};
+pub use sim_core::{Choice, Event, IllegalChoice, Outcome, Player, Prng, Request, Sink};
 pub use state::{Battle, Compat, Rules};
 
 impl sim_core::Generation for Battle {
@@ -39,8 +39,12 @@ impl sim_core::Generation for Battle {
         n
     }
 
-    fn update<S: Sink>(&mut self, c1: Choice, c2: Choice, sink: &mut S) -> Outcome {
-        self.apply_choices(c1, c2, sink);
+    fn is_legal(&self, player: Player, choice: Choice) -> bool {
+        Battle::is_legal(self, player, choice)
+    }
+
+    fn update_unchecked<S: Sink>(&mut self, c1: Choice, c2: Choice, sink: &mut S) -> Outcome {
+        self.apply_choices_unchecked(c1, c2, sink);
         self.outcome()
     }
 
@@ -72,7 +76,7 @@ mod tests {
     fn plays_to_completion() {
         let t = team();
         for seed in 0..50u64 {
-            let mut b = Battle::new(&t, &t, Prng::from_u64(seed * 7919 + 1), Rules::OU);
+            let mut b = Battle::new(&t, &t, Prng::from_u64(seed * 7919 + 1), Rules::OU).unwrap();
             let mut buf = [Choice::Pass; 16];
             let mut steps = 0;
             let mut r = seed;
@@ -83,7 +87,7 @@ mod tests {
                     r = r.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
                     c[p] = buf[(r >> 33) as usize % n];
                 }
-                b.update(c[0], c[1], &mut ());
+                b.update(c[0], c[1], &mut ()).unwrap();
                 steps += 1;
             }
             assert!(b.outcome() != Outcome::Ongoing, "seed {seed} did not finish");

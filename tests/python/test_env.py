@@ -117,14 +117,16 @@ def test_builtin_opponent(opponent):
     n = 64
     env = pe.VecEnv(num_envs=n, seed=0, teams="builtin", threads=2, opponent=opponent)
     obs, mask = env.reset()
-    assert not obs[:, 1].any()
+    assert not obs[:, 1].any() and not mask[:, 1].any()
     rng = np.random.default_rng(0)
     actions = np.zeros((n, 2), dtype=np.int16)
     for _ in range(200):
         actions[:, 0] = sample_legal(mask, rng)[:, 0]
         actions[:, 1] = 99  # ignored with a built-in opponent
         obs, mask, reward, done, info = env.step(actions)
-        assert not obs[:, 1].any()
+        # Player 2's rows are zero: observation and mask.
+        assert not obs[:, 1].any() and not mask[:, 1].any()
+        assert mask[:, 0].any(-1).all()
 
 
 def test_gymnasium_wrapper():
@@ -189,3 +191,163 @@ def test_native_backend_deterministic_and_clonable():
 def test_unknown_backend_rejected():
     with pytest.raises(ValueError):
         pe.VecEnv(num_envs=1, backend="nope")
+
+
+# ---- Robustness ------------------------------------------------------------------------------
+
+CRASH_TEAMS = (
+    '{"name":"mew","pokemon":[{"species":"Mew","moves":["Psychic","Soft-Boiled","Thunder Wave","Transform"]}]}\n'
+    '{"name":"jiggly","pokemon":[{"species":"Jigglypuff","moves":["Sing"]}]}\n'
+)
+
+
+def test_move_slot_null_regression(tmp_path):
+    """Showdown 0.11.11 crashes ("moveSlot is null") when a Pokémon that selected its 4th move
+    (Transform) into a 1-move foe must "Fight" while asleep; the native sim falls back to slot 0
+    (docs/SIM_STATUS.md). Before the fix ~55% of these games panicked."""
+    teams = tmp_path / "crash.jsonl"
+    teams.write_text(CRASH_TEAMS)
+    n = 64
+    env = pe.VecEnv(num_envs=n, seed=1, teams=str(teams), threads=1, backend="native", validate=False)
+    _, mask = env.reset()
+    rng = np.random.default_rng(0)
+    games = 0
+    for _ in range(1500):
+        a = sample_legal(mask, rng)
+        a[mask[:, :, 3]] = 3  # prefer the 4th move (Transform) whenever legal
+        _, mask, _, done, info = env.step(a)
+        assert not info["error"].any(), info["errors"]
+        games += int(done.sum())
+    assert games > 100 and env.total_errors == 0
+
+
+def test_panic_is_isolated_per_env():
+    n = 16
+    env = pe.VecEnv(num_envs=n, seed=2, teams="randbats", threads=2, backend="native")
+    _, mask = env.reset()
+    rng = np.random.default_rng(1)
+    for _ in range(5):
+        _, mask, *_ = env.step(sample_legal(mask, rng))
+    env._env._inject_panic(5)
+    obs, mask, reward, done, info = env.step(sample_legal(mask, rng))
+    assert info["error"][5] and info["error"].sum() == 1
+    assert info["outcome"][5] == pe.OUTCOME_ERROR and done[5] and info["truncated"][5]
+    assert reward[5, 0] == 0.0
+    assert [i for i, _ in info["errors"]] == [5] and "injected panic" in info["errors"][0][1]
+    assert mask.any(-1).all() and np.isfinite(obs).all()
+    assert env.total_errors == 1
+    # Everything keeps running.
+    for _ in range(50):
+        obs, mask, reward, done, info = env.step(sample_legal(mask, rng))
+        assert not info["error"].any() and info["errors"] == []
+
+
+@pytest.mark.parametrize("backend", ["pkmn", "native"])
+def test_opp_action_obs_frame(backend):
+    n = 64
+    env = pe.VecEnv(num_envs=n, seed=3, teams="data/teams/gen1ou", threads=2, backend=backend)
+    _, mask = env.reset()
+    rng = np.random.default_rng(2)
+    seen_switch = seen_move = 0
+    for _ in range(300):
+        a = sample_legal(mask, rng)
+        prev_mask = mask.copy()
+        obs, mask, _, done, info = env.step(a)
+        lab = info["opp_action_obs_frame"]
+        assert lab.shape == (n, 2) and lab.dtype == np.int16
+        assert ((lab >= pe.OPP_ACTION_NONE) & (lab < pe.OPP_ACTION_CLASSES)).all()
+        for p in range(2):
+            q = 1 - p
+            switched = a[:, q] >= 4
+            only_pass = prev_mask[:, q, 0] & (prev_mask[:, q].sum(-1) == 1)
+            # Switches map to appearance slots, moves to move ids (0 = unnamed forced move).
+            assert (lab[switched, p] >= pe.OPP_ACTION_SWITCH_BASE).all()
+            assert (lab[~switched & ~only_pass, p] <= 165).all()
+            assert (lab[~switched & ~only_pass, p] >= 0).all()
+            seen_switch += int(switched.sum())
+            seen_move += int((~switched).sum())
+    assert seen_switch > 100 and seen_move > 1000
+
+
+def _team(*mons):
+    import json
+
+    return json.dumps({"name": "t", "pokemon": [dict(species=s, moves=list(m), **kw) for s, m, kw in mons]})
+
+
+@pytest.mark.parametrize(
+    "mons, reason",
+    [
+        ([("Tauros", ["Body Slam"], {}), ("Tauros", ["Earthquake"], {})], "Species Clause"),
+        ([("Tauros", ["Spore"], {})], "cannot learn"),
+    ],
+)
+def test_team_legality_validation(tmp_path, mons, reason):
+    f = tmp_path / "t.json"
+    f.write_text(_team(*mons))
+    with pytest.raises(ValueError, match=reason):
+        pe.VecEnv(num_envs=1, teams=str(f), threads=1, backend="native")
+    env = pe.VecEnv(num_envs=1, teams=str(f), threads=1, backend="native", validate=False)
+    env.reset()
+
+
+def test_team_always_rejected(tmp_path):
+    f = tmp_path / "t.json"
+    for mons in ([("Tauros", ["Body Slam"], {"dvs": {"atk": 16}})], [("Nidoran", ["Tackle"], {})]):
+        f.write_text(_team(*mons))
+        for validate in (True, False):
+            with pytest.raises(ValueError):
+                pe.VecEnv(num_envs=1, teams=str(f), threads=1, validate=validate)
+
+
+def test_nidoran_aliases(tmp_path):
+    f = tmp_path / "t.json"
+    f.write_text(_team(("Nidoran♀", ["Double Kick"], {}), ("Nidoran♂", ["Horn Attack"], {})))
+    env = pe.VecEnv(num_envs=1, teams=str(f), threads=1, backend="native")
+    obs, _ = env.reset()
+    names = pe.species_names()
+    sid = [int(obs[0, 0, off]) for off, vocab in pe.id_offsets() if vocab == "species"][:2]
+    assert [names[s] for s in sid] == ["Nidoran-F", "Nidoran-M"]
+
+
+def test_train_eval_split():
+    import json
+
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2] / "data/teams/gen1ou"
+    pool = [l for l in (root / "teams.jsonl").read_text().splitlines() if l.strip()]
+    train = [l for l in (root / "split/train.jsonl").read_text().splitlines() if l.strip()]
+    held = [l for l in (root / "split/eval.jsonl").read_text().splitlines() if l.strip()]
+    assert sorted(train + held) == sorted(pool) and not set(train) & set(held)
+    assert 0.08 < len(held) / len(pool) < 0.12
+    for spec in (pe.TEAMS_TRAIN, pe.TEAMS_EVAL):
+        env = pe.VecEnv(num_envs=2, teams=spec, threads=1, backend="native")
+        env.reset()
+    with pytest.raises(ValueError):
+        pe.VecEnv(num_envs=1, teams="data/teams/gen1ou:nope", threads=1)
+    assert json.loads(held[0])["pokemon"]
+
+
+def test_corrupted_blobs_never_crash():
+    env = pe.VecEnv(num_envs=4, seed=5, teams="randbats", threads=1, backend="native")
+    _, mask = env.reset()
+    rng = np.random.default_rng(3)
+    for _ in range(20):
+        _, mask, *_ = env.step(sample_legal(mask, rng))
+    blob = bytearray(env.clone_state(1))
+    accepted = 0
+    for _ in range(3000):
+        b = bytearray(blob)
+        for i in rng.integers(0, len(b), size=rng.integers(1, 4)):
+            b[i] ^= 1 << int(rng.integers(0, 8))
+        try:
+            env.restore_state(1, bytes(b))
+        except ValueError:
+            continue
+        accepted += 1
+        for _ in range(10):
+            # `mask` is the env's reused buffer: restore_state refreshed env 1's rows in place.
+            _, mask, _, _, info = env.step(sample_legal(mask, rng))
+            assert not info["error"].any(), info["errors"]
+    assert accepted > 100

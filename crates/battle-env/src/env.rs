@@ -1,6 +1,6 @@
 //! A single two-player environment: battle + reveal memories + action tables + RNG.
 
-use crate::backend::{Backend, Outcome, MAX_CHOICES, NUM_ACTIONS};
+use crate::backend::{Action, Backend, Outcome, MAX_CHOICES, NUM_ACTIONS};
 use crate::memory::{Memory, SideTrack, TurnEvents};
 use crate::opponent::{self, Opponent};
 use crate::rng::Rng;
@@ -16,6 +16,24 @@ pub mod outcome {
     pub const P2_WIN: i8 = 2;
     pub const TIE: i8 = 3;
     pub const TRUNCATED: i8 = 4;
+    /// The simulator panicked while stepping this env; the game was abandoned (no winner) and
+    /// the env was reset. Also counts as truncated.
+    pub const ERROR: i8 = 5;
+}
+
+/// Observer-frame encoding of the opponent's action (`StepResult::opp_action`,
+/// `info["opp_action_obs_frame"]`; docs/OBSERVATION.md).
+pub mod opp_action {
+    /// The opponent had no decision (it passed while waiting).
+    pub const NONE: i16 = -1;
+    /// A move choice that names no specific move (recharge, Gen 1 "Fight" while asleep, frozen
+    /// or partially trapped, locked-in turns); `1..=165` is the chosen move's id.
+    pub const UNNAMED_MOVE: i16 = 0;
+    /// A switch to the opponent Pokémon in appearance-order slot `j` (the observation's
+    /// `opp_mon` block `j`) is `SWITCH_BASE + j`.
+    pub const SWITCH_BASE: i16 = 166;
+    /// Number of classes (`0..CLASSES`; `NONE` is outside).
+    pub const CLASSES: i16 = SWITCH_BASE + 6;
 }
 
 #[derive(Clone, Debug)]
@@ -43,6 +61,8 @@ pub struct Env<B: Backend> {
     pub mask: [[bool; NUM_ACTIONS]; 2],
     /// Updates played in the current game.
     pub steps: u32,
+    /// Test hook: the next `step` panics (exercises VecEnv's per-env panic isolation).
+    pub inject_panic: bool,
 }
 
 impl<B: Backend> Clone for Env<B> {
@@ -61,6 +81,9 @@ pub struct StepResult {
     pub outcome: i8,
     /// Turn count of the finished game (when `done`).
     pub turns: u32,
+    /// `opp_action[p]`: what player `1 - p` chose this step, in player `p`'s frame
+    /// (see [`opp_action`]).
+    pub opp_action: [i16; 2],
 }
 
 #[derive(Debug)]
@@ -81,6 +104,7 @@ impl<B: Backend> Env<B> {
             table: [[B::Choice::default(); NUM_ACTIONS]; 2],
             mask: [[false; NUM_ACTIONS]; 2],
             steps: 0,
+            inject_panic: false,
         };
         env.start();
         env
@@ -111,18 +135,30 @@ impl<B: Backend> Env<B> {
 
     /// Recompute legal choices, action tables and masks for both players.
     pub fn refresh(&mut self) {
+        assert!(self.try_refresh(), "backend returned no legal choices");
+    }
+
+    /// [`Env::refresh`]; `false` if a player has no legal choice or a choice maps outside the
+    /// action space (impossible for a live game, but a restored blob may hold a finished one).
+    fn try_refresh(&mut self) -> bool {
         let mut buf = [B::Choice::default(); MAX_CHOICES];
         for p in 0..2 {
             self.mask[p] = [false; NUM_ACTIONS];
             let n = B::choices(&self.battle, p, &mut buf);
-            assert!(n > 0, "backend returned no legal choices");
+            if n == 0 {
+                return false;
+            }
             for &c in &buf[..n] {
                 let a = B::action_of(&self.battle, p, c).index();
+                if a >= NUM_ACTIONS {
+                    return false;
+                }
                 debug_assert!(!self.mask[p][a], "two choices map to action {a}");
                 self.mask[p][a] = true;
                 self.table[p][a] = c;
             }
         }
+        true
     }
 
     pub fn is_legal(&self, player: usize, action: i64) -> bool {
@@ -138,9 +174,28 @@ impl<B: Backend> Env<B> {
     /// Play one update. Actions must be legal (check with `is_legal` first). Auto-resets when
     /// the game ends.
     pub fn step(&mut self, a1: usize, a2: usize, cfg: &EnvConfig, source: &TeamSource) -> StepResult {
+        if std::mem::take(&mut self.inject_panic) {
+            panic!("injected panic (Env::inject_panic test hook)");
+        }
         let (c1, c2) = (self.table[0][a1], self.table[1][a2]);
+        let chosen =[B::action_of(&self.battle, 0, c1), B::action_of(&self.battle, 1, c2)];
+        let moves = [B::choice_move(&self.battle, 0, c1), B::choice_move(&self.battle, 1, c2)];
         let o = B::update(&mut self.battle, c1, c2, &mut self.mem);
         self.steps += 1;
+        // Labels use the observers' memories after the update (a switch-in is revealed by it).
+        let label = |obs: usize| -> i16 {
+            let q = 1 - obs;
+            match chosen[q] {
+                Action::Pass => opp_action::NONE,
+                Action::Move(_) => moves[q] as i16,
+                Action::Switch(slot) => {
+                    let m = &self.mem[obs];
+                    let j = if m.is_revealed(slot) { m.slot_of[slot as usize] } else { m.n_revealed.min(5) };
+                    opp_action::SWITCH_BASE + j as i16
+                }
+            }
+        };
+        let opp = [label(0), label(1)];
         let turn = B::turn(&self.battle);
         let (reward, code) = match o {
             Outcome::P1Win => (1.0, outcome::P1_WIN),
@@ -155,7 +210,7 @@ impl<B: Backend> Env<B> {
         } else {
             self.refresh();
         }
-        StepResult { reward, done, outcome: code, turns: turn }
+        StepResult { reward, done, outcome: code, turns: turn, opp_action: opp }
     }
 
     pub fn observe(&self, player: usize, cfg: &EnvConfig, out: &mut [f32]) {
@@ -192,9 +247,9 @@ impl<B: Backend> Env<B> {
             table: [[B::Choice::default(); NUM_ACTIONS]; 2],
             mask: [[false; NUM_ACTIONS]; 2],
             steps,
+            inject_panic: false,
         };
-        env.refresh();
-        Some(env)
+        env.try_refresh().then_some(env)
     }
 }
 
@@ -289,5 +344,5 @@ fn read_memory(r: &mut Reader) -> Option<Memory> {
             cant: r.byte()?,
         };
     }
-    Some(m)
+    m.is_valid().then_some(m)
 }

@@ -113,7 +113,11 @@ rs += species.map(([n]) => {
   const ls = learnset(n).filter(m => !BLOCKED.has(toID(moves[m - 1][0])));
   return `    &[${ls.join(', ')}],`;
 }).join('\n') + '\n];\n\n';
-const sets = species.map(([n], i) => [i + 1, randbats[toID(n)]]).filter(([, s]) => s && s.moves);
+rs += '/// Every Gen 1 learnable move per species (union over the evolution chain, no exclusions):\n';
+rs += '/// what team validation accepts.\n';
+rs += `pub static LEARNSETS_ALL: [&[u8]; ${species.length + 1}] = [\n    &[],\n`;
+rs += species.map(([n]) => `    &[${learnset(n).join(', ')}],`).join('\n') + '\n];\n\n';
+const sets =species.map(([n], i) => [i + 1, randbats[toID(n)]]).filter(([, s]) => s && s.moves);
 rs += '/// Pokémon Showdown Gen 1 random-battle sets: (species, level, candidate moves).\n';
 rs += `pub static RANDBATS: [(u8, u8, &[u8]); ${sets.length}] = [\n`;
 rs += sets.map(([sp, s]) => {

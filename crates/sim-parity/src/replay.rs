@@ -123,8 +123,8 @@ fn choice_strings(b: &Battle, p: usize) -> Vec<String> {
 
 /// Replay `trace` (produced by the runner for `spec`).
 pub fn replay(spec: &Spec, trace: &Trace) -> Replay {
-    let (t1, t2) = match spec.teams() {
-        Ok(t) => t,
+    let mut b = match spec.battle() {
+        Ok(b) => b,
         Err(e) => {
             return Replay::Diverged(Box::new(Divergence {
                 id: spec.id.clone(),
@@ -137,7 +137,6 @@ pub fn replay(spec: &Spec, trace: &Trace) -> Replay {
             }))
         }
     };
-    let mut b = Battle::new(&t1, &t2, spec.prng(), spec.rules());
     trace::start();
     let diverge = |b: &Battle, step: usize, kind: Kind, category: String, details: String, st: &Step| {
         Replay::Diverged(Box::new(Divergence {
@@ -167,7 +166,7 @@ pub fn replay(spec: &Spec, trace: &Trace) -> Replay {
         let mut nb = b;
         let mut events: Vec<sim_core::Event> = Vec::new();
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            nb.apply_choices(c[0], c[1], &mut events);
+            nb.apply_choices_unchecked(c[0], c[1], &mut events);
             nb
         }));
         match res {
@@ -281,8 +280,7 @@ impl Compact {
 
     /// Replay; `Err((step, what))` at the first mismatch.
     pub fn check(&self) -> Result<(), (usize, String)> {
-        let (t1, t2) = self.spec.teams().map_err(|e| (0, e))?;
-        let mut b = Battle::new(&t1, &t2, self.spec.prng(), self.spec.rules());
+        let mut b = self.spec.battle().map_err(|e| (0, e))?;
         let choices = self.spec.choices.clone().unwrap_or_default();
         for (i, st) in self.steps.iter().enumerate() {
             let parts: Vec<&str> = st.split(',').collect();
@@ -298,7 +296,7 @@ impl Compact {
                 }
             }
             let c = if i == 0 { [String::new(), String::new()] } else { choices[i - 1].clone() };
-            b.apply_choices(Choice::parse(&c[0]).unwrap_or_default(), Choice::parse(&c[1]).unwrap_or_default(), &mut ());
+            b.apply_choices_unchecked(Choice::parse(&c[0]).unwrap_or_default(), Choice::parse(&c[1]).unwrap_or_default(), &mut ());
             if format!("{:016x}", state_hash(&snapshot(&b))) != parts[2] {
                 return Err((i, "state (or PRNG seed) differs".into()));
             }

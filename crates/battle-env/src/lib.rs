@@ -23,4 +23,4 @@ pub use obs::{OBS_DIM, OBS_VERSION};
 pub use opponent::Opponent;
 pub use pkmn1::Pkmn1;
 pub use team::{Team, TeamSource};
-pub use vec_env::{StepOut, VecEnv};
+pub use vec_env::{StepError, StepOut, VecEnv};

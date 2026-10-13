@@ -53,6 +53,9 @@ class PokemonGen1Env(gym.Env):
         truncated = bool(info["truncated"][0])
         terminated = bool(done[0]) and not truncated
         out_info: dict[str, Any] = {"outcome": int(info["outcome"][0]), "turns": int(info["turns"][0])}
+        if info["error"][0]:
+            # The simulator panicked: the game was abandoned (truncated) and a new one started.
+            out_info["error"] = info["errors"][0][1]
         # On done, obs already belongs to the next (auto-reset) game; Gymnasium callers reset
         # anyway, which starts yet another game. The terminal observation is not exposed.
         return self._wrap(obs, mask), float(reward[0, 0]), terminated, truncated, out_info

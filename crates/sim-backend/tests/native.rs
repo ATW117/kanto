@@ -38,6 +38,8 @@ struct Bufs {
     truncated: Vec<bool>,
     outcome: Vec<i8>,
     turns: Vec<u32>,
+    opp_action: Vec<i16>,
+    error: Vec<bool>,
 }
 
 impl Bufs {
@@ -50,6 +52,8 @@ impl Bufs {
             truncated: vec![false; n],
             outcome: vec![0; n],
             turns: vec![0; n],
+            opp_action: vec![0; 2 * n],
+            error: vec![false; n],
         }
     }
     fn out(&mut self) -> StepOut<'_> {
@@ -61,6 +65,8 @@ impl Bufs {
             truncated: &mut self.truncated,
             outcome: &mut self.outcome,
             turns: &mut self.turns,
+            opp_action: &mut self.opp_action,
+            error: &mut self.error,
         }
     }
 }
@@ -250,4 +256,214 @@ fn fresh_battle_reveals_only_leads() {
         assert_eq!(v.sides[0].mons[i].stats, teams[0].mons[i].stats);
     }
     assert_eq!(Native1::choices(&b, 0, &mut out), 9);
+}
+
+// ---- Robustness ----------------------------------------------------------------------------
+
+fn crash_teams() -> TeamSource {
+    // Showdown's "moveSlot is null" scenario: Mew transforms (4th move) into a 1-move
+    // Jigglypuff and is put to sleep (docs/SIM_STATUS.md, "Showdown crashes").
+    let text = r#"{"name":"mew","pokemon":[{"species":"Mew","moves":["Psychic","Soft-Boiled","Thunder Wave","Transform"]}]}
+{"name":"jiggly","pokemon":[{"species":"Jigglypuff","moves":["Sing"]}]}"#;
+    let specs = battle_env::team::parse_teams(text).unwrap();
+    TeamSource::Pool(specs.iter().map(|s| battle_env::Team::from_spec(s).unwrap()).collect())
+}
+
+/// The auditor's repro at env level: prefer the 4th move whenever legal. Before the fix about
+/// half of these games panicked; now none may.
+#[test]
+fn move_slot_null_scenario_runs_clean() {
+    let n = 64;
+    let mut v = VecEnv::<Native1>::new(n, 1, crash_teams(), EnvConfig::default(), 2);
+    let mut b = Bufs::new(n);
+    v.reset(None, &mut b.obs, &mut b.mask);
+    let mut rng = Rng::new(3);
+    let mut games = 0;
+    for _ in 0..1500 {
+        let mut acts = random_actions(&v, &mut rng);
+        for (i, e) in v.envs.iter().enumerate() {
+            for p in 0..2 {
+                if e.mask[p][3] {
+                    acts[2 * i + p] = 3;
+                }
+            }
+        }
+        v.step(&acts, b.out()).unwrap();
+        assert!(v.errors.is_empty(), "simulator panicked: {:?}", v.errors);
+        games += b.done.iter().filter(|&&d| d).count();
+    }
+    assert!(games > 100, "only {games} games finished");
+    assert_eq!(v.total_errors, 0);
+}
+
+/// A panic inside one env's step ends that game as ERROR, resets the env, and leaves every
+/// other env exactly as an un-poisoned run would.
+#[test]
+fn panics_are_isolated_per_env() {
+    let n = 48;
+    let poisoned = [7usize, 31];
+    let mut a = VecEnv::<Native1>::new(n, 5, pool(), EnvConfig::default(), 4);
+    let mut r = VecEnv::<Native1>::new(n, 5, pool(), EnvConfig::default(), 4);
+    let (mut ba, mut br) = (Bufs::new(n), Bufs::new(n));
+    a.reset(None, &mut ba.obs, &mut ba.mask);
+    r.reset(None, &mut br.obs, &mut br.mask);
+    let mut rng = Rng::new(9);
+    for t in 0..60 {
+        let acts = random_actions(&r, &mut rng);
+        if t == 10 {
+            for &i in &poisoned {
+                a.envs[i].inject_panic = true;
+            }
+        }
+        // After the poisoned step the poisoned envs play their own (new) games.
+        let mut acts_a = acts.clone();
+        if t > 10 {
+            let mut rng2 = Rng::new(t as u64);
+            for &i in &poisoned {
+                for p in 0..2 {
+                    acts_a[2 * i + p] = battle_env::opponent::random_legal(&a.envs[i].mask[p], &mut rng2) as i16;
+                }
+            }
+        }
+        a.step(&acts_a, ba.out()).unwrap();
+        r.step(&acts, br.out()).unwrap();
+        if t == 10 {
+            assert_eq!(a.errors.iter().map(|e| e.0).collect::<Vec<_>>(), poisoned);
+            assert!(a.errors[0].1.contains("injected panic"));
+            for &i in &poisoned {
+                assert!(ba.error[i] && ba.done[i] && ba.truncated[i]);
+                assert_eq!(ba.outcome[i], outcome::ERROR);
+                assert_eq!(ba.reward[2 * i], 0.0);
+                // The env was reset: a fresh game at turn 1 with a usable mask.
+                assert_eq!(Native1::turn(&a.envs[i].battle), 1);
+                assert!(ba.mask[i * 2 * NUM_ACTIONS..(i * 2 + 1) * NUM_ACTIONS].iter().any(|&m| m));
+            }
+        } else {
+            assert!(a.errors.is_empty() && !ba.error.iter().any(|&e| e));
+        }
+        for i in (0..n).filter(|i| !poisoned.contains(i)) {
+            assert_eq!(a.clone_state(i), r.clone_state(i), "env {i} diverged at step {t}");
+            assert_eq!(ba.obs[i * 2 * OBS_DIM..(i + 1) * 2 * OBS_DIM], br.obs[i * 2 * OBS_DIM..(i + 1) * 2 * OBS_DIM]);
+            assert_eq!(ba.done[i], br.done[i]);
+        }
+    }
+    assert_eq!(a.total_errors, 2);
+}
+
+/// With a built-in opponent, player 2's observation and mask rows are zero.
+#[test]
+fn builtin_opponent_rows_are_zero() {
+    let n = 32;
+    let cfg = EnvConfig { opponent: Some(Opponent::MaxDamage), ..EnvConfig::default() };
+    let mut v = VecEnv::<Native1>::new(n, 2, pool(), cfg, 2);
+    let mut b = Bufs::new(n);
+    v.reset(None, &mut b.obs, &mut b.mask);
+    let mut rng = Rng::new(1);
+    for _ in 0..50 {
+        for i in 0..n {
+            assert!(b.obs[(2 * i + 1) * OBS_DIM..(2 * i + 2) * OBS_DIM].iter().all(|&x| x == 0.0));
+            assert!(b.mask[(2 * i + 1) * NUM_ACTIONS..(2 * i + 2) * NUM_ACTIONS].iter().all(|&m| !m));
+            assert!(b.mask[2 * i * NUM_ACTIONS..(2 * i + 1) * NUM_ACTIONS].iter().any(|&m| m));
+        }
+        let acts = random_actions(&v, &mut rng);
+        v.step(&acts, b.out()).unwrap();
+    }
+}
+
+/// `opp_action[i, p]` is player 1-p's choice in p's frame: the chosen move's id (or 0 for
+/// unnamed forced moves), 166 + appearance slot for switches, -1 for a pass.
+#[test]
+fn opponent_action_labels() {
+    use battle_env::env::opp_action;
+    let n = 64;
+    let mut v = VecEnv::<Native1>::new(n, 4, pool(), EnvConfig::default(), 4);
+    let mut b = Bufs::new(n);
+    v.reset(None, &mut b.obs, &mut b.mask);
+    let mut rng = Rng::new(17);
+    let (mut moves, mut unnamed, mut switches, mut passes) = (0, 0, 0, 0);
+    for _ in 0..400 {
+        let acts = random_actions(&v, &mut rng);
+        let before: Vec<Env<Native1>> = v.envs.clone();
+        v.step(&acts, b.out()).unwrap();
+        for i in 0..n {
+            for p in 0..2 {
+                let q = 1 - p;
+                let label = b.opp_action[2 * i + p];
+                let e = &before[i];
+                let a = acts[2 * i + q] as usize;
+                let view = Native1::view(&e.battle);
+                match Native1::action_of(&e.battle, q, e.table[q][a]) {
+                    Action::Pass => {
+                        assert_eq!(label, opp_action::NONE);
+                        passes += 1;
+                    }
+                    Action::Move(k) => {
+                        assert!((0..=165).contains(&label), "move label {label}");
+                        let n_legal = e.mask[q].iter().filter(|&&m| m).count();
+                        if label > 0 && label != 165 && n_legal > 1 && k > 0 {
+                            assert_eq!(view.sides[q].active.moves[k as usize] as i16, label, "env {i}");
+                        }
+                        moves += 1;
+                        unnamed += (label == 0) as usize;
+                    }
+                    Action::Switch(slot) => {
+                        assert!((opp_action::SWITCH_BASE..opp_action::CLASSES).contains(&label));
+                        if !b.done[i] {
+                            let mem = &v.envs[i].mem[p];
+                            assert_eq!(mem.slot_of[slot as usize] as i16, label - opp_action::SWITCH_BASE);
+                        }
+                        switches += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(moves > 1000 && switches > 100 && passes > 10 && unnamed > 10, "moves {moves} ({unnamed} unnamed) switches {switches} passes {passes}");
+}
+
+/// Env-level `clone_state` blobs (battle + reveal memories + RNG): random corruptions are either
+/// rejected or restore to an env that steps and observes without panicking.
+#[test]
+fn corrupted_env_blobs_are_rejected_or_safe() {
+    let n = 32;
+    let mut v = VecEnv::<Native1>::new(n, 8, pool(), EnvConfig::default(), 2);
+    let mut b = Bufs::new(n);
+    v.reset(None, &mut b.obs, &mut b.mask);
+    let mut rng = Rng::new(5);
+    let mut blobs = Vec::new();
+    for t in 0..120 {
+        let acts = random_actions(&v, &mut rng);
+        v.step(&acts, b.out()).unwrap();
+        if t % 10 == 0 {
+            blobs.extend((0..n).map(|i| v.clone_state(i)));
+        }
+    }
+    let cfg = EnvConfig::default();
+    let source = pool();
+    let (mut accepted, mut panicked) = (0, 0);
+    for round in 0..20_000u64 {
+        let mut blob = blobs[rng.below(blobs.len() as u64) as usize].clone();
+        for _ in 0..1 + rng.below(3) {
+            let i = rng.below(blob.len() as u64) as usize;
+            blob[i] ^= 1 << rng.below(8);
+        }
+        let restored = std::panic::catch_unwind(|| Env::<Native1>::from_bytes(&blob)).expect("from_bytes panicked");
+        let Some(env) = restored else { continue };
+        accepted += 1;
+        let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut env = env;
+            let mut r = Rng::new(round);
+            let mut obs = vec![0f32; OBS_DIM];
+            for _ in 0..30 {
+                env.observe(0, &cfg, &mut obs);
+                env.observe(1, &cfg, &mut obs);
+                let a1 = battle_env::opponent::random_legal(&env.mask[0], &mut r);
+                let a2 = battle_env::opponent::random_legal(&env.mask[1], &mut r);
+                env.step(a1, a2, &cfg, &source);
+            }
+        }));
+        panicked += ok.is_err() as usize;
+    }
+    assert_eq!(panicked, 0, "{panicked} of {accepted} accepted env blobs panicked");
+    assert!(accepted > 1000, "only {accepted} accepted");
 }

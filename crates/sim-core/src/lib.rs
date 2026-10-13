@@ -74,6 +74,21 @@ impl Choice {
     }
 }
 
+/// A choice that is not among the player's legal choices ([`Generation::choices`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IllegalChoice {
+    pub player: Player,
+    pub choice: Choice,
+}
+
+impl std::fmt::Display for IllegalChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "illegal choice '{}' for player {}", self.choice.to_showdown(), self.player + 1)
+    }
+}
+
+impl std::error::Error for IllegalChoice {}
+
 /// Battle result after an update, from p1's perspective.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Outcome {
@@ -185,8 +200,28 @@ pub trait Generation: Copy + Send + Sync + 'static {
     fn request(&self, player: Player) -> Request;
     /// Legal choices for `player` (what Showdown's request offers); returns the count.
     fn choices(&self, player: Player, out: &mut [Choice]) -> usize;
-    /// Apply both players' choices (use `Choice::Pass` for a player without a request).
-    fn update<S: Sink>(&mut self, c1: Choice, c2: Choice, sink: &mut S) -> Outcome;
+    /// Whether `choice` is one of `player`'s legal choices (the set [`Generation::choices`]
+    /// returns).
+    fn is_legal(&self, player: Player, choice: Choice) -> bool {
+        let mut buf = [Choice::Pass; 16];
+        let n = self.choices(player, &mut buf);
+        buf[..n].contains(&choice)
+    }
+    /// Apply both players' choices (use `Choice::Pass` for a player without a request). Both
+    /// choices are validated with [`Generation::is_legal`] first; on an illegal choice the battle
+    /// is left untouched and the error is returned.
+    fn update<S: Sink>(&mut self, c1: Choice, c2: Choice, sink: &mut S) -> Result<Outcome, IllegalChoice> {
+        for (player, choice) in [(0, c1), (1, c2)] {
+            if !self.is_legal(player, choice) {
+                return Err(IllegalChoice { player, choice });
+            }
+        }
+        Ok(self.update_unchecked(c1, c2, sink))
+    }
+    /// [`Generation::update`] without validation: the hot path for callers that only pass
+    /// choices taken from [`Generation::choices`] (the env does, via its action masks). Illegal
+    /// choices give unspecified results and may panic.
+    fn update_unchecked<S: Sink>(&mut self, c1: Choice, c2: Choice, sink: &mut S) -> Outcome;
     /// Turn number as shown by `|turn|`.
     fn turn(&self) -> u32;
     /// The result so far.

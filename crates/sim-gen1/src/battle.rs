@@ -41,6 +41,61 @@ impl MonSpec {
     }
 }
 
+/// A team [`Battle::new`] cannot build a battle from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TeamError {
+    /// 0 = p1, 1 = p2.
+    pub player: Player,
+    /// Team index of the offending Pokémon (`None` for team-level problems such as the size).
+    pub slot: Option<usize>,
+    pub reason: String,
+}
+
+impl std::fmt::Display for TeamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.slot {
+            Some(i) => write!(f, "p{} team slot {}: {}", self.player + 1, i, self.reason),
+            None => write!(f, "p{} team: {}", self.player + 1, self.reason),
+        }
+    }
+}
+
+impl std::error::Error for TeamError {}
+
+impl MonSpec {
+    /// Range checks: species 1..=151, level 1..=100, 1-4 distinct moves in 1..=164 (Struggle is
+    /// not a learnable move; 0 = empty slot), IVs 0..=31.
+    pub fn validate(&self) -> Result<(), String> {
+        if !(1..=151).contains(&self.species) {
+            return Err(format!("species id {} out of range 1..=151", self.species));
+        }
+        if !(1..=100).contains(&self.level) {
+            return Err(format!("level {} out of range 1..=100", self.level));
+        }
+        let mut seen = [false; 256];
+        let mut n = 0;
+        for &m in &self.moves {
+            if m == 0 {
+                continue;
+            }
+            if m > 164 {
+                return Err(format!("move id {m} out of range 1..=164"));
+            }
+            if std::mem::replace(&mut seen[m as usize], true) {
+                return Err(format!("duplicate move {}", MOVES[m as usize].id));
+            }
+            n += 1;
+        }
+        if n == 0 {
+            return Err("no moves".into());
+        }
+        if let Some(iv) = self.ivs.iter().find(|&&iv| iv > 31) {
+            return Err(format!("IV {iv} out of range 0..=31"));
+        }
+        Ok(())
+    }
+}
+
 /// Showdown `statModify` for Gen 1-2 (`base` = species base stats, `[hp, atk, def, spa, spd, spe]`).
 pub fn calc_stats(base: [u8; 6], ivs: [u8; 6], evs: [u8; 6], level: u8) -> [u16; 6] {
     let mut out = [0u16; 6];
@@ -78,8 +133,17 @@ pub mod req {
 }
 
 impl Battle {
-    /// A new battle (Showdown `Battle` + both `setPlayer` calls, before `start`).
-    pub fn new(p1: &[MonSpec], p2: &[MonSpec], rng: Prng, rules: Rules) -> Battle {
+    /// A new battle (Showdown `Battle` + both `setPlayer` calls, before `start`). Each team needs
+    /// 1-6 Pokémon that pass [`MonSpec::validate`]; anything else is an error, never a panic.
+    pub fn new(p1: &[MonSpec], p2: &[MonSpec], rng: Prng, rules: Rules) -> Result<Battle, TeamError> {
+        for (player, team) in [p1, p2].into_iter().enumerate() {
+            if team.is_empty() || team.len() > MAX_TEAM {
+                return Err(TeamError { player, slot: None, reason: format!("{} Pokémon (need 1-6)", team.len()) });
+            }
+            for (i, m) in team.iter().enumerate() {
+                m.validate().map_err(|reason| TeamError { player, slot: Some(i), reason })?;
+            }
+        }
         let mut b = Battle {
             sides: [Side::new(p1), Side::new(p2)],
             rng,
@@ -97,7 +161,7 @@ impl Battle {
         for p in 0..2 {
             b.sides[p].active = Active::default();
         }
-        b
+        Ok(b)
     }
 
     /// Outcome so far.
@@ -151,9 +215,54 @@ impl Battle {
 
     // ---- commitChoices -----------------------------------------------------------------------
 
-    /// Apply both players' choices (`Battle#choose` for each side, then `commitChoices`).
-    /// Choices for players without a move/switch request are ignored.
-    pub fn apply_choices<S: Sink>(&mut self, c1: Choice, c2: Choice, s: &mut S) {
+    /// Whether `c` is one of `p`'s legal choices: exactly the set `Generation::choices` returns
+    /// (no allocation; this is what [`Battle::apply_choices`] validates with).
+    pub fn is_legal(&self, p: Player, c: Choice) -> bool {
+        if !self.started {
+            return c == Choice::Pass;
+        }
+        if self.ended {
+            return false;
+        }
+        let sd = &self.sides[p];
+        let bench_ok = |k: u8| (2..=sd.n).contains(&k) && !sd.mons[sd.order[k as usize - 1] as usize].fainted;
+        match sd.request {
+            Request::Move => {
+                let (moves, n, trapped) = self.request_moves(p);
+                match c {
+                    Choice::Move(k) => k >= 1 && k as usize <= n && !moves[k as usize - 1].disabled,
+                    Choice::Switch(k) => !trapped && bench_ok(k),
+                    Choice::Pass => false,
+                }
+            }
+            Request::Switch => match c {
+                Choice::Switch(k) => bench_ok(k),
+                Choice::Pass => !(2..=sd.n).any(bench_ok),
+                Choice::Move(_) => false,
+            },
+            Request::None | Request::Wait => c == Choice::Pass,
+        }
+    }
+
+    /// Apply both players' choices (`Battle#choose` for each side, then `commitChoices`). Both
+    /// choices must be legal ([`Battle::is_legal`]; `Pass` for a player without a request): an
+    /// illegal choice (switching to the active or a fainted/missing Pokémon, a move with no PP,
+    /// an out-of-range index, ...) is rejected before anything changes. After the battle ended
+    /// no choice is legal.
+    pub fn apply_choices<S: Sink>(&mut self, c1: Choice, c2: Choice, s: &mut S) -> Result<Outcome, sim_core::IllegalChoice> {
+        for (player, choice) in [(0, c1), (1, c2)] {
+            if !self.is_legal(player, choice) {
+                return Err(sim_core::IllegalChoice { player, choice });
+            }
+        }
+        self.apply_choices_unchecked(c1, c2, s);
+        Ok(self.outcome())
+    }
+
+    /// [`Battle::apply_choices`] without validation: the hot path for callers that only pass
+    /// choices from [`Battle::legal_choices`] (the env masks actions; the parity replay compares
+    /// legal sets first). Illegal choices give unspecified results and may panic.
+    pub fn apply_choices_unchecked<S: Sink>(&mut self, c1: Choice, c2: Choice, s: &mut S) {
         if !self.started {
             self.start(s);
             return;
@@ -169,7 +278,9 @@ impl Battle {
                 Request::Move => Some(self.choose_move_request(p, choices[p])),
                 Request::Switch => match choices[p] {
                     Choice::Switch(k) => Some(Chosen::InstaSwitch(self.sides[p].order[k as usize - 1])),
-                    c => panic!("player {p} must switch, got {c:?}"),
+                    // A forced switch with nothing left to switch in (only reachable from a
+                    // hand-made state): nothing to do for this side.
+                    _ => None,
                 },
                 _ => None,
             };
@@ -237,14 +348,27 @@ impl Battle {
 
     /// `Side#commitChoices` (Gen 1 branch) for a move action; returns the move id to execute
     /// (`choice.moveid = this.lastSelectedMove`).
+    ///
+    /// Showdown 0.11.11 throws "moveSlot is null" when `lastSelectedMoveSlot` points past the
+    /// active's current move slots (a Pokémon that selected its 4th move, e.g. Transform, into
+    /// a foe with fewer moves, then falls asleep or freezes and must "Fight"). There is no ground
+    /// truth for that state, so we do what pkmn/engine does and read slot 0 instead of panicking
+    /// (docs/SIM_STATUS.md, "Showdown crashes").
     fn commit_move_choice(&mut self, p: Player, c: Chosen) -> u8 {
         let side = &mut self.sides[p];
+        let selected_slot = |side: &Side| {
+            let i = side.last_selected_move_slot as usize;
+            if i < side.active.n_slots as usize {
+                i
+            } else {
+                0
+            }
+        };
         match c {
             Chosen::Fight => {
                 let status = side.mon().status;
                 if matches!(status, st::FRZ | st::SLP) {
-                    let i = side.last_selected_move_slot as usize;
-                    assert!(i < side.active.n_slots as usize, "moveSlot is null");
+                    let i = selected_slot(side);
                     side.last_enemy_selected_move = side.slot(i).id;
                 } else if side.active.has(v::PARTIALLYTRAPPED) {
                     side.last_selected_move = pm::CANNOTMOVE;
@@ -259,13 +383,11 @@ impl Battle {
                 side.last_selected_move = id;
                 side.last_selected_move_slot = slot;
                 side.last_move = id;
-                let i = side.last_selected_move_slot as usize;
-                assert!(i < side.active.n_slots as usize, "moveSlot is null");
+                let i = selected_slot(side);
                 side.last_enemy_selected_move = side.slot(i).id;
             }
             Chosen::Locked(_) => {
-                let i = side.last_selected_move_slot as usize;
-                assert!(i < side.active.n_slots as usize, "moveSlot is null");
+                let i = selected_slot(side);
                 side.last_enemy_selected_move = side.slot(i).id;
             }
             Chosen::Switch(_) | Chosen::InstaSwitch(_) => unreachable!(),
@@ -883,7 +1005,7 @@ impl Battle {
 
     /// The request's move list and `trapped` flag for the current state (pure; equal to
     /// `getMoveRequestData` once its side effects have been applied by `makeRequest`).
-    pub(crate) fn request_moves(&self, p: Player) -> ([ReqMove; 4], usize, bool) {
+    pub fn request_moves(&self, p: Player) -> ([ReqMove; 4], usize, bool) {
         let mut locked = self.locked_move(p);
         let hard = locked.is_some();
         let sd = &self.sides[p];
@@ -972,8 +1094,8 @@ enum Chosen {
 }
 
 impl Side {
+    /// A side from a validated team (see [`Battle::new`]).
     fn new(team: &[MonSpec]) -> Side {
-        assert!(!team.is_empty() && team.len() <= MAX_TEAM);
         let mut mons = [Mon::default(); MAX_TEAM];
         for (i, spec) in team.iter().enumerate() {
             let sp = &SPECIES[spec.species as usize];

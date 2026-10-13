@@ -99,16 +99,32 @@ impl Team {
         &self.mons[..self.size as usize]
     }
 
-    /// Validate and resolve a JSON team.
+    /// Validate and resolve a JSON team, including the legality checks (see
+    /// [`Team::from_spec_opts`]).
     pub fn from_spec(spec: &TeamSpec) -> Result<Team, String> {
+        Team::from_spec_opts(spec, true)
+    }
+
+    /// Resolve a JSON team. Always checked: 1-6 Pokémon, known species and moves, 1-4 distinct
+    /// moves per Pokémon (no Struggle), level 1-100, DVs 0-15 (out-of-range DVs are an error,
+    /// never clamped). With `validate` (the default everywhere), also the Gen 1 legality rules a
+    /// team validator enforces: Species Clause (no duplicate species), every move in the
+    /// species' Gen 1 learnset, and an HP DV, if given, consistent with the other DVs.
+    pub fn from_spec_opts(spec: &TeamSpec, validate: bool) -> Result<Team, String> {
         let n = spec.pokemon.len();
         if n == 0 || n > MAX_PARTY {
             return Err(format!("team '{}' has {n} Pokémon (need 1-6)", spec.name));
         }
-        let mut mons = Vec::with_capacity(n);
+        let mut mons: Vec<Mon> = Vec::with_capacity(n);
         for p in &spec.pokemon {
             let species = data::species_id(&p.species)
                 .ok_or_else(|| format!("team '{}': unknown species '{}'", spec.name, p.species))?;
+            if validate && mons.iter().any(|m| m.species == species) {
+                return Err(format!(
+                    "team '{}': duplicate species {} (Species Clause; pass validate=False to allow)",
+                    spec.name, p.species
+                ));
+            }
             if p.moves.is_empty() || p.moves.len() > 4 {
                 return Err(format!("team '{}': {} has {} moves", spec.name, p.species, p.moves.len()));
             }
@@ -121,23 +137,37 @@ impl Team {
                 if moves.contains(&id) {
                     return Err(format!("team '{}': duplicate move '{m}'", spec.name));
                 }
+                if validate && !data::can_learn(species, id) {
+                    return Err(format!(
+                        "team '{}': {} cannot learn {m} in Gen 1 (pass validate=False to allow)",
+                        spec.name, p.species
+                    ));
+                }
                 moves.push(id);
             }
             let level = p.level.unwrap_or(100);
             if !(1..=100).contains(&level) {
                 return Err(format!("team '{}': bad level {level}", spec.name));
             }
-            let dv = |v: Option<u16>| v.unwrap_or(15).min(15) as u8;
-            let ex = |v: Option<u16>| v.unwrap_or(65535);
             let d = p.dvs.clone().unwrap_or_default();
             let e = p.exp.clone().unwrap_or_default();
-            mons.push(Mon::new(
-                species,
-                &moves,
-                level,
-                [dv(d.atk), dv(d.def), dv(d.spe), dv(d.spc)],
-                [ex(e.hp), ex(e.atk), ex(e.def), ex(e.spe), ex(e.spc)],
-            ));
+            let dv = |what: &str, v: Option<u16>| -> Result<u8, String> {
+                match v.unwrap_or(15) {
+                    x @ 0..=15 => Ok(x as u8),
+                    x => Err(format!("team '{}': {} {what} DV {x} out of range 0-15", spec.name, p.species)),
+                }
+            };
+            let dvs = [dv("atk", d.atk)?, dv("def", d.def)?, dv("spe", d.spe)?, dv("spc", d.spc)?];
+            let derived = (dvs[0] & 1) << 3 | (dvs[1] & 1) << 2 | (dvs[2] & 1) << 1 | (dvs[3] & 1);
+            let hp = dv("hp", d.hp)?;
+            if validate && d.hp.is_some() && hp != derived {
+                return Err(format!(
+                    "team '{}': {} HP DV {hp} is inconsistent with the other DVs (Gen 1 derives {derived})",
+                    spec.name, p.species
+                ));
+            }
+            let ex = |v: Option<u16>| v.unwrap_or(65535);
+            mons.push(Mon::new(species, &moves, level, dvs, [ex(e.hp), ex(e.atk), ex(e.def), ex(e.spe), ex(e.spc)]));
         }
         Ok(Team::new(&mons))
     }
@@ -160,8 +190,28 @@ pub fn parse_teams(text: &str) -> Result<Vec<TeamSpec>, String> {
         .collect()
 }
 
-/// Load all teams from a `.json`/`.jsonl` file or a directory of them (non-recursive).
+/// Load all teams from a `.json`/`.jsonl` file or a directory of them (non-recursive), with the
+/// legality checks of [`Team::from_spec`].
 pub fn load_teams(path: &Path) -> Result<Vec<Team>, String> {
+    load_teams_opts(path, true)
+}
+
+/// Named subsets of a pool directory: `"<dir>:train"` / `"<dir>:eval"` load
+/// `<dir>/split/{train,eval}.jsonl`, a deterministic 90/10 split by a stable hash of each team
+/// (see `data/teams/gen1ou/split.py`).
+pub const SPLITS: [&str; 2] = ["train", "eval"];
+
+/// Resolve a `"<dir>:<split>"` spec to the split file, if `spec` has that form.
+pub fn split_path(spec: &str) -> Option<std::path::PathBuf> {
+    let (dir, split) = spec.rsplit_once(':')?;
+    if !SPLITS.contains(&split) || dir.is_empty() {
+        return None;
+    }
+    Some(Path::new(dir).join("split").join(format!("{split}.jsonl")))
+}
+
+/// [`load_teams`]; `validate = false` skips the legality checks (see [`Team::from_spec_opts`]).
+pub fn load_teams_opts(path: &Path, validate: bool) -> Result<Vec<Team>, String> {
     let mut files = Vec::new();
     if path.is_dir() {
         for entry in std::fs::read_dir(path).map_err(|e| format!("{}: {e}", path.display()))? {
@@ -180,7 +230,7 @@ pub fn load_teams(path: &Path) -> Result<Vec<Team>, String> {
     for f in files {
         let text = std::fs::read_to_string(&f).map_err(|e| format!("{}: {e}", f.display()))?;
         for spec in parse_teams(&text).map_err(|e| format!("{}: {e}", f.display()))? {
-            teams.push(Team::from_spec(&spec).map_err(|e| format!("{}: {e}", f.display()))?);
+            teams.push(Team::from_spec_opts(&spec, validate).map_err(|e| format!("{}: {e}", f.display()))?);
         }
     }
     if teams.is_empty() {
@@ -212,13 +262,23 @@ pub enum TeamSource {
 }
 
 impl TeamSource {
-    /// Parse a source spec: "random", "randbats", "builtin", or a path to a file/directory.
+    /// Parse a source spec: "random", "randbats", "builtin", a path to a file/directory, or
+    /// `"<pool dir>:train"` / `"<pool dir>:eval"` (the pool's held-out split, [`split_path`]).
+    /// Pool teams get the legality checks of [`Team::from_spec`].
     pub fn from_spec(spec: &str) -> Result<TeamSource, String> {
+        TeamSource::from_spec_opts(spec, true)
+    }
+
+    /// [`TeamSource::from_spec`]; `validate = false` skips the legality checks for pool files.
+    pub fn from_spec_opts(spec: &str, validate: bool) -> Result<TeamSource, String> {
         match spec {
             "random" => Ok(TeamSource::RandomLegal),
             "randbats" => Ok(TeamSource::RandBats),
             "builtin" => Ok(TeamSource::Pool(builtin_teams())),
-            path => Ok(TeamSource::Pool(load_teams(Path::new(path))?)),
+            path => {
+                let file = split_path(path).unwrap_or_else(|| path.into());
+                Ok(TeamSource::Pool(load_teams_opts(&file, validate)?))
+            }
         }
     }
 
@@ -315,6 +375,54 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn one(json: &str, validate: bool) -> Result<Team, String> {
+        let spec: TeamSpec = serde_json::from_str(json).unwrap();
+        Team::from_spec_opts(&spec, validate)
+    }
+
+    #[test]
+    fn validation_rules() {
+        let ok = r#"{"pokemon":[{"species":"Tauros","moves":["Body Slam"]},{"species":"Nidoran♀","moves":["Double Kick"]},{"species":"Nidoran♂","moves":["Horn Attack"]}]}"#;
+        let t = one(ok, true).unwrap();
+        assert_eq!(t.mons[1].species, data::species_id("Nidoran-F").unwrap());
+        assert_eq!(t.mons[2].species, data::species_id("Nidoran-M").unwrap());
+        // Species Clause and learnsets: rejected by default, allowed with validate=false.
+        let dup = r#"{"pokemon":[{"species":"Tauros","moves":["Body Slam"]},{"species":"Tauros","moves":["Earthquake"]}]}"#;
+        let illegal = r#"{"pokemon":[{"species":"Tauros","moves":["Spore"]}]}"#;
+        let bad_hp = r#"{"pokemon":[{"species":"Tauros","moves":["Body Slam"],"dvs":{"hp":15,"atk":14}}]}"#;
+        for (json, what) in [(dup, "Species Clause"), (illegal, "cannot learn"), (bad_hp, "HP DV")] {
+            let e = one(json, true).unwrap_err();
+            assert!(e.contains(what), "{e}");
+            assert!(one(json, false).is_ok());
+        }
+        let good_hp = r#"{"pokemon":[{"species":"Tauros","moves":["Body Slam"],"dvs":{"hp":7,"atk":14}}]}"#;
+        assert!(one(good_hp, true).is_ok());
+        // Out-of-range DVs are an error (never clamped), with or without validation.
+        let dv16 = r#"{"pokemon":[{"species":"Tauros","moves":["Body Slam"],"dvs":{"atk":16}}]}"#;
+        for v in [true, false] {
+            assert!(one(dv16, v).unwrap_err().contains("out of range"));
+        }
+        assert!(one(r#"{"pokemon":[{"species":"Nidoran","moves":["Tackle"]}]}"#, false).is_err());
+    }
+
+    #[test]
+    fn pool_validates_and_split_is_a_partition() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data/teams/gen1ou");
+        if !dir.exists() {
+            return;
+        }
+        let all = load_teams(&dir).expect("the pool passes validation");
+        let d = dir.to_str().unwrap();
+        let TeamSource::Pool(train) = TeamSource::from_spec(&format!("{d}:train")).unwrap() else { panic!() };
+        let TeamSource::Pool(eval) = TeamSource::from_spec(&format!("{d}:eval")).unwrap() else { panic!() };
+        assert_eq!(train.len() + eval.len(), all.len());
+        let frac = eval.len() as f64 / all.len() as f64;
+        assert!((0.08..0.12).contains(&frac), "eval fraction {frac}");
+        let train_set: std::collections::HashSet<String> = train.iter().map(|t| format!("{t:?}")).collect();
+        assert!(eval.iter().all(|t| !train_set.contains(&format!("{t:?}"))), "split overlaps");
+        assert!(TeamSource::from_spec(&format!("{d}:test")).is_err());
     }
 
     #[test]

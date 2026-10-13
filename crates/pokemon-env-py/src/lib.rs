@@ -62,12 +62,14 @@ struct VecEnv {
     truncated: Py<PyArray1<bool>>,
     outcome: Py<PyArray1<i8>>,
     turns: Py<PyArray1<u32>>,
+    opp_action: Py<PyArray2<i16>>,
+    error: Py<PyArray1<bool>>,
 }
 
 #[pymethods]
 impl VecEnv {
     #[new]
-    #[pyo3(signature = (num_envs, seed=0, teams="data/teams/gen1ou", threads=16, opponent=None, max_turns=1000, reveal_hidden=false, backend="pkmn"))]
+    #[pyo3(signature = (num_envs, seed=0, teams="data/teams/gen1ou", threads=16, opponent=None, max_turns=1000, reveal_hidden=false, backend="pkmn", validate=true))]
     fn new(
         py: Python<'_>,
         num_envs: usize,
@@ -78,11 +80,12 @@ impl VecEnv {
         max_turns: u32,
         reveal_hidden: bool,
         backend: &str,
+        validate: bool,
     ) -> PyResult<Self> {
         if num_envs == 0 {
             return Err(PyValueError::new_err("num_envs must be > 0"));
         }
-        let source = TeamSource::from_spec(teams).map_err(PyValueError::new_err)?;
+        let source = TeamSource::from_spec_opts(teams, validate).map_err(PyValueError::new_err)?;
         let opponent = opponent.map(Opponent::parse).transpose().map_err(PyValueError::new_err)?;
         let cfg = EnvConfig { max_turns, opponent, reveal_hidden };
         let backend: &'static str = match backend {
@@ -103,6 +106,8 @@ impl VecEnv {
             truncated: PyArray1::<bool>::zeros(py, n, false).unbind(),
             outcome: PyArray1::<i8>::zeros(py, n, false).unbind(),
             turns: PyArray1::<u32>::zeros(py, n, false).unbind(),
+            opp_action: PyArray2::<i16>::zeros(py, [n, 2], false).unbind(),
+            error: PyArray1::<bool>::zeros(py, n, false).unbind(),
         })
     }
 
@@ -130,7 +135,7 @@ impl VecEnv {
             return Err(PyValueError::new_err(format!("actions must have shape ({n}, 2), got {:?}", actions.shape())));
         }
         let acts = actions.as_slice()?;
-        let (obs, mask, reward, done, outcome_arr, turns, truncated) = (
+        let (obs, mask, reward, done, outcome_arr, turns, truncated, opp_action, error) = (
             self.obs.bind(py),
             self.mask.bind(py),
             self.reward.bind(py),
@@ -138,6 +143,8 @@ impl VecEnv {
             self.outcome.bind(py),
             self.turns.bind(py),
             self.truncated.bind(py),
+            self.opp_action.bind(py),
+            self.error.bind(py),
         );
         // SAFETY: as in `reset`.
         let out = unsafe {
@@ -149,6 +156,8 @@ impl VecEnv {
                 truncated: truncated.as_slice_mut()?,
                 outcome: outcome_arr.as_slice_mut()?,
                 turns: turns.as_slice_mut()?,
+                opp_action: opp_action.as_slice_mut()?,
+                error: error.as_slice_mut()?,
             }
         };
         let inner = &mut self.inner;
@@ -157,7 +166,25 @@ impl VecEnv {
         info.set_item("outcome", outcome_arr)?;
         info.set_item("turns", turns)?;
         info.set_item("truncated", truncated)?;
+        info.set_item("opp_action_obs_frame", opp_action)?;
+        info.set_item("error", error)?;
+        let errors: Vec<(usize, String)> = with_inner!(&self.inner, v => v.errors.clone());
+        info.set_item("errors", errors)?;
         (obs, mask, reward, done, info).into_pyobject(py)
+    }
+
+    /// Test hook: make env `i`'s next step panic inside the simulator call (to exercise the
+    /// per-env panic isolation).
+    fn _inject_panic(&mut self, i: usize) -> PyResult<()> {
+        self.check(i)?;
+        with_inner!(&mut self.inner, v => v.envs[i].inject_panic = true);
+        Ok(())
+    }
+
+    /// Simulator panics caught (and turned into `ERROR` outcomes) since construction.
+    #[getter]
+    fn total_errors(&self) -> u64 {
+        with_inner!(&self.inner, v => v.total_errors)
     }
 
     /// Serialise env `i`'s full state (battle, reveal memories, RNG) to bytes.
@@ -261,6 +288,10 @@ fn _pokemon_env(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("MAX_TURNS", battle_env::MAX_TURNS)?;
     m.add("SPECIES_UNKNOWN", obs::SPECIES_UNKNOWN)?;
     m.add("MOVE_UNKNOWN", obs::MOVE_UNKNOWN)?;
+    m.add("OUTCOME_ERROR", battle_env::env::outcome::ERROR)?;
+    m.add("OPP_ACTION_NONE", battle_env::env::opp_action::NONE)?;
+    m.add("OPP_ACTION_SWITCH_BASE", battle_env::env::opp_action::SWITCH_BASE)?;
+    m.add("OPP_ACTION_CLASSES", battle_env::env::opp_action::CLASSES)?;
     m.add_function(wrap_pyfunction!(obs_layout, m)?)?;
     m.add_function(wrap_pyfunction!(id_offsets, m)?)?;
     m.add_function(wrap_pyfunction!(species_names, m)?)?;

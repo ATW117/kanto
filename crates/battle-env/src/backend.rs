@@ -64,6 +64,13 @@ pub trait Backend: Send + Sync + 'static {
     /// The env-level meaning of a raw choice (for masks and action mapping).
     fn action_of(b: &Self::Battle, player: usize, c: Self::Choice) -> Action;
 
+    /// The move id (1..=165) a move choice selects, or 0 when the choice names no specific move
+    /// (recharging, Gen 1 "Fight" while asleep/frozen/trapped, locked-in turns). Used for the
+    /// observer-frame opponent-action label (`info["opp_action_obs_frame"]`).
+    fn choice_move(_b: &Self::Battle, _player: usize, _c: Self::Choice) -> u8 {
+        0
+    }
+
     /// Play one update with both players' choices; updates both players' reveal memories from
     /// the battle log (memory `p` belongs to player `p` and tracks what it has seen).
     fn update(b: &mut Self::Battle, c1: Self::Choice, c2: Self::Choice, mem: &mut [Memory; 2]) -> Outcome;

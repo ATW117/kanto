@@ -99,7 +99,7 @@ fn play_native_c(b: &mut Battle, seed: u64, mut on_update: impl FnMut(&Battle), 
     let (mut c1, mut c2) = (Choice::Pass, Choice::Pass);
     let mut updates = 0;
     loop {
-        b.apply_choices(c1, c2, &mut ());
+        b.apply_choices_unchecked(c1, c2, &mut ());
         updates += 1;
         on_update(b);
         if b.ended || b.turn as u32 >= MAX_TURNS {
@@ -231,7 +231,7 @@ pub fn diff_pkmn(n: usize, seed: u64, teams: &str, compat: Compat, verbose: bool
         let mut updates = 0;
         loop {
             Pkmn1::update(&mut pk, c_p[0], c_p[1], &mut mem);
-            nb.apply_choices(c_n[0], c_n[1], &mut ());
+            nb.apply_choices_unchecked(c_n[0], c_n[1], &mut ());
             updates += 1;
             let (va, vb) = (Pkmn1::view(&pk), sim_backend::view(&nb));
             if fingerprint(&va) != fingerprint(&vb) {
