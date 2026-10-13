@@ -10,7 +10,7 @@ use battle_env::backend::NUM_ACTIONS;
 use battle_env::env::EnvConfig;
 use battle_env::obs::{self, OBS_DIM, OBS_VERSION};
 use battle_env::{data, Opponent, Pkmn1, StepOut, TeamSource};
-use sim_backend::{Native1, Native1Ou};
+use sim_backend::{Native1, Native1Nc};
 use numpy::{PyArray1, PyArray2, PyArray3, PyArrayMethods, PyReadonlyArray2, PyUntypedArrayMethods};
 use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
@@ -20,7 +20,7 @@ use pyo3::types::{PyBytes, PyDict};
 enum Inner {
     Pkmn(battle_env::VecEnv<Pkmn1>),
     Native(battle_env::VecEnv<Native1>),
-    NativeOu(battle_env::VecEnv<Native1Ou>),
+    NativeNc(battle_env::VecEnv<Native1Nc>),
 }
 
 /// Dispatch a method call to whichever backend the env uses.
@@ -29,7 +29,7 @@ macro_rules! with_inner {
         match $inner {
             Inner::Pkmn($v) => $body,
             Inner::Native($v) => $body,
-            Inner::NativeOu($v) => $body,
+            Inner::NativeNc($v) => $body,
         }
     };
 }
@@ -39,8 +39,8 @@ impl Inner {
         Ok(match backend {
             "pkmn" => Inner::Pkmn(battle_env::VecEnv::new(n, seed, source, cfg, threads)),
             "native" => Inner::Native(battle_env::VecEnv::new(n, seed, source, cfg, threads)),
-            "native-ou" => Inner::NativeOu(battle_env::VecEnv::new(n, seed, source, cfg, threads)),
-            b => return Err(format!("unknown backend '{b}' (expected 'pkmn', 'native' or 'native-ou')")),
+            "native-nc" => Inner::NativeNc(battle_env::VecEnv::new(n, seed, source, cfg, threads)),
+            b => return Err(format!("unknown backend '{b}' (expected 'pkmn', 'native' or 'native-nc')")),
         })
     }
     fn num_envs(&self) -> usize {
@@ -88,8 +88,8 @@ impl VecEnv {
         let backend: &'static str = match backend {
             "pkmn" => "pkmn",
             "native" => "native",
-            "native-ou" => "native-ou",
-            b => return Err(PyValueError::new_err(format!("unknown backend '{b}' (expected 'pkmn', 'native' or 'native-ou')"))),
+            "native-nc" => "native-nc",
+            b => return Err(PyValueError::new_err(format!("unknown backend '{b}' (expected 'pkmn', 'native' or 'native-nc')"))),
         };
         let inner = py.detach(|| Inner::new(backend, num_envs, seed, source, cfg, threads)).map_err(PyValueError::new_err)?;
         let n = num_envs;
@@ -193,7 +193,7 @@ impl VecEnv {
         NUM_ACTIONS
     }
 
-    /// The simulator backend: "pkmn", "native" or "native-ou".
+    /// The simulator backend: "pkmn", "native" or "native-nc".
     #[getter]
     fn backend(&self) -> &'static str {
         self.backend
@@ -247,7 +247,7 @@ fn bench_engine(py: Python<'_>, battles: usize, threads: usize, teams: &str, see
     match backend {
         "pkmn" => Ok(py.detach(|| battle_env::bench::engine_only_with::<Pkmn1>(&source, battles, threads, seed))),
         "native" => Ok(py.detach(|| battle_env::bench::engine_only_with::<Native1>(&source, battles, threads, seed))),
-        "native-ou" => Ok(py.detach(|| battle_env::bench::engine_only_with::<Native1Ou>(&source, battles, threads, seed))),
+        "native-nc" => Ok(py.detach(|| battle_env::bench::engine_only_with::<Native1Nc>(&source, battles, threads, seed))),
         b => Err(PyValueError::new_err(format!("unknown backend '{b}'"))),
     }
 }

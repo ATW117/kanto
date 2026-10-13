@@ -107,6 +107,10 @@ fn main() {
         "replay" => replay_files(&args),
         "fixtures" => fixtures(&args),
         "bench" => bench::bench(args.num("battles", 2000) as usize, args.num("seed", 1), &args.get("teams", "randbats")),
+        "diff-pkmn" => {
+            let compat = if args.get("compat", "pkmn") == "vanilla" { sim_gen1::Compat::Vanilla } else { sim_gen1::Compat::Pkmn };
+            bench::diff_pkmn(args.num("battles", 2000) as usize, args.num("seed", 1), &args.get("teams", "randbats"), compat, args.flag("verbose"));
+        }
         _ => {
             eprintln!("usage: parity fuzz|replay|fixtures|bench ... (see crates/sim-parity/src/main.rs)");
             std::process::exit(2);

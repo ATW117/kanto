@@ -76,9 +76,10 @@ class VecEnv:
         reveal_hidden: debug only; fill the privileged observation block with the own side's
             hidden counters (sleep/confusion/disable turns left, Substitute HP, Toxic counter).
         backend: battle simulator. ``"pkmn"`` (default): pkmn/engine in Showdown compatibility
-            mode. ``"native"``: the native Rust simulator, matching vanilla Pokémon Showdown
-            0.11.11 Gen 1 with no clauses (docs/SIM_DESIGN.md). ``"native-ou"``: native with
-            ``[Gen 1] OU``'s Sleep Clause Mod and Freeze Clause Mod.
+            mode (which enforces Sleep and Freeze Clause Mod). ``"native"``: the native Rust
+            simulator, matching vanilla Pokémon Showdown 0.11.11 ``[Gen 1] OU`` mechanics
+            (Sleep and Freeze Clause Mod; docs/SIM_DESIGN.md). ``"native-nc"``: native
+            without the clauses.
     """
 
     def __init__(

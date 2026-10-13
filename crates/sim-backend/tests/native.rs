@@ -8,7 +8,7 @@ use battle_env::obs::OBS_DIM;
 use battle_env::rng::Rng;
 use battle_env::team::{builtin_teams, TeamSource};
 use battle_env::{Opponent, StepOut, VecEnv};
-use sim_backend::{Native1, Native1Ou};
+use sim_backend::{Native1, Native1Nc};
 use std::path::PathBuf;
 
 fn pool() -> TeamSource {
@@ -94,7 +94,7 @@ fn deterministic_and_thread_independent() {
     let a = rollout_hash::<Native1>(42, 1, 200);
     assert_eq!(a, rollout_hash::<Native1>(42, 4, 200));
     assert_ne!(a, rollout_hash::<Native1>(43, 4, 200));
-    assert_ne!(a, rollout_hash::<Native1Ou>(42, 4, 200));
+    assert_ne!(a, rollout_hash::<Native1Nc>(42, 4, 200));
 }
 
 fn clone_restore<B: Backend>() {
@@ -138,7 +138,7 @@ fn clone_restore<B: Backend>() {
 #[test]
 fn clone_restore_round_trip() {
     clone_restore::<Native1>();
-    clone_restore::<Native1Ou>();
+    clone_restore::<Native1Nc>();
 }
 
 fn terminate<B: Backend>() {
@@ -169,7 +169,7 @@ fn terminate<B: Backend>() {
 #[test]
 fn random_games_terminate() {
     terminate::<Native1>();
-    terminate::<Native1Ou>();
+    terminate::<Native1Nc>();
 }
 
 #[test]

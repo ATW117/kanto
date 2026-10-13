@@ -331,6 +331,7 @@ name = "sim-backend"
 version = "0.1.0"
 dependencies = [
  "battle-env",
+ "pkmn-sys",
  "sim-core",
  "sim-data",
  "sim-gen1",
@@ -357,6 +358,7 @@ name = "sim-parity"
 version = "0.1.0"
 dependencies = [
  "battle-env",
+ "pkmn-sys",
  "serde",
  "serde_json",
  "sim-backend",

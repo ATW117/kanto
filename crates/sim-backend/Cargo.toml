@@ -10,3 +10,6 @@ battle-env = { path = "../battle-env" }
 sim-core = { path = "../sim-core" }
 sim-data = { path = "../sim-data" }
 sim-gen1 = { path = "../sim-gen1" }
+
+[dev-dependencies]
+pkmn-sys = { path = "../pkmn-sys" }

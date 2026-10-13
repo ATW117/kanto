@@ -1,7 +1,8 @@
 //! `battle_env::Backend` implementations backed by the native simulator (`sim-gen1`).
 //!
-//! - [`Native1`]: Gen 1 with no clauses (the same mechanics pkmn/engine models; the default).
-//! - [`Native1Ou`]: Gen 1 with `[Gen 1] OU`'s Sleep Clause Mod and Freeze Clause Mod.
+//! - [`Native1`]: Gen 1 with `[Gen 1] OU`'s Sleep Clause Mod and Freeze Clause Mod (pkmn/engine
+//!   enforces both clauses in `-Dshowdown` mode, so this is the drop-in replacement).
+//! - [`Native1Nc`]: Gen 1 without clauses.
 //!
 //! Both reproduce vanilla pokemon-showdown 0.11.11 (see docs/SIM_DESIGN.md). The env-level
 //! semantics match the pkmn backend: battles start unstarted with `Pass` as the only choice,
@@ -19,10 +20,10 @@ use sim_data::gen1::SPECIES;
 use sim_gen1::state::{st, v, Battle};
 use sim_gen1::{MonSpec, Prng, Rules};
 
-/// Gen 1 without clauses.
-pub struct Native1;
 /// Gen 1 with Sleep Clause Mod and Freeze Clause Mod (`[Gen 1] OU`).
-pub struct Native1Ou;
+pub struct Native1;
+/// Gen 1 without clauses.
+pub struct Native1Nc;
 
 /// Showdown sets for a battle-env team (DVs and stat exp are kept on `battle_env::team::Mon`).
 pub fn team_specs(t: &Team) -> Vec<MonSpec> {
@@ -263,5 +264,5 @@ macro_rules! native_backend {
     };
 }
 
-native_backend!(Native1, Rules::NO_CLAUSES);
-native_backend!(Native1Ou, Rules::OU);
+native_backend!(Native1, Rules::OU);
+native_backend!(Native1Nc, Rules::NO_CLAUSES);

@@ -149,7 +149,7 @@ def test_gymnasium_wrapper():
 # ---- Native (Showdown-exact) backend ---------------------------------------------------------
 
 
-@pytest.mark.parametrize("backend", ["native", "native-ou"])
+@pytest.mark.parametrize("backend", ["native", "native-nc"])
 def test_native_backend_rollout(backend):
     n = 64
     env = pe.VecEnv(num_envs=n, seed=0, teams="data/teams/gen1ou", threads=2, backend=backend)
