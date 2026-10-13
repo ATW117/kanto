@@ -910,15 +910,15 @@ impl Battle {
             };
             let foe_all_transform = || {
                 (0..self.sides[q].n as usize).all(|i| {
-                    self.sides[q].mons[i].fainted() || self.mon_move_ids(q, i).iter().all(|&m| m == data::mv::TRANSFORM)
+                    self.sides[q].mons[i].fainted() || self.mon_slots_all(q, i, |s| s.id == data::mv::TRANSFORM)
                 })
             };
             (0..self.sides[p].n as usize).all(|i| {
                 let m = &self.sides[p].mons[i];
                 m.fainted()
                     || m.status == st::FRZ
-                    || (self.mon_move_ids(p, i).iter().all(|&mv| mv == data::mv::TRANSFORM) && foe_all_transform())
-                    || (self.mon_move_pps(p, i).iter().all(|&pp| pp == 0) && foe_all_ghosts())
+                    || (self.mon_slots_all(p, i, |s| s.id == data::mv::TRANSFORM) && foe_all_transform())
+                    || (self.mon_slots_all(p, i, |s| s.pp() == 0) && foe_all_ghosts())
             })
         });
         if stuck {
@@ -937,35 +937,17 @@ impl Battle {
         }
     }
 
-    /// `pokemon.moves` (current move slot ids).
-    fn mon_move_ids(&self, p: Player, i: usize) -> ArrayVec4 {
+    /// Whether `f` holds for every current move slot of team member `i` (`pokemon.moveSlots`:
+    /// the active's may be Mimic/Transform copies).
+    #[inline]
+    fn mon_slots_all(&self, p: Player, i: usize, f: impl Fn(MoveSlot) -> bool) -> bool {
         let sd = &self.sides[p];
-        let mut out = ArrayVec4::default();
         if i == sd.active_slot() && sd.active.species != 0 {
-            for k in 0..sd.active.n_slots as usize {
-                out.push(sd.slot(k).id);
-            }
+            (0..(sd.active.n_slots as usize).min(4)).all(|k| f(sd.slot(k)))
         } else {
-            for k in 0..sd.mons[i].n_moves as usize {
-                out.push(sd.mons[i].moves[k].id);
-            }
+            let m = &sd.mons[i];
+            m.moves[..(m.n_moves as usize).min(4)].iter().all(|&s| f(s))
         }
-        out
-    }
-
-    fn mon_move_pps(&self, p: Player, i: usize) -> ArrayVec4 {
-        let sd = &self.sides[p];
-        let mut out = ArrayVec4::default();
-        if i == sd.active_slot() && sd.active.species != 0 {
-            for k in 0..sd.active.n_slots as usize {
-                out.push(sd.slot(k).pp());
-            }
-        } else {
-            for k in 0..sd.mons[i].n_moves as usize {
-                out.push(sd.mons[i].moves[k].pp());
-            }
-        }
-        out
     }
 
     // ---- Requests ----------------------------------------------------------------------------
@@ -1080,9 +1062,10 @@ impl Battle {
         let sd = &self.sides[p];
         let mut n = 0;
         let bench = |out: &mut [Choice], n: &mut usize| {
-            for k in 2..=sd.n as usize {
-                if !sd.mons[sd.order[k - 1] as usize].fainted() {
-                    out[*n] = Choice::Switch(k as u8);
+            let team = (sd.n as usize).min(MAX_TEAM);
+            for (k, &o) in sd.order[..team].iter().enumerate().skip(1) {
+                if !sd.mons[(o as usize).min(MAX_TEAM - 1)].fainted() {
+                    out[*n] = Choice::Switch(k as u8 + 1);
                     *n += 1;
                 }
             }
@@ -1206,21 +1189,4 @@ impl Side {
 #[inline]
 pub(crate) fn modify_stat(stat: u16, modifier: f64) -> u16 {
     ((stat as f64 * modifier).floor() as i64).max(1) as u16
-}
-
-/// A tiny fixed-capacity vec of up to 4 bytes.
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct ArrayVec4 {
-    pub len: usize,
-    pub items: [u8; 4],
-}
-
-impl ArrayVec4 {
-    pub fn push(&mut self, v: u8) {
-        self.items[self.len] = v;
-        self.len += 1;
-    }
-    pub fn iter(&self) -> std::slice::Iter<'_, u8> {
-        self.items[..self.len].iter()
-    }
 }

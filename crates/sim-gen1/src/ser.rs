@@ -167,6 +167,7 @@ impl Battle {
     /// Append exactly [`BATTLE_BYTES`] bytes.
     pub fn to_bytes(&self, out: &mut Vec<u8>) {
         let start = out.len();
+        out.reserve(BATTLE_BYTES);
         self.put(out);
         let n = out.len() - start;
         assert!(n <= BATTLE_BYTES, "battle encoding is {n} bytes");
