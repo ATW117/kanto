@@ -90,10 +90,11 @@ impl Battle {
                 self.remove_volatile(p, v::MUSTRECHARGE);
             }
             v::PARTIALLYTRAPPED => {
+                let pt_source = self.sides[source].order[0];
                 let a = &mut self.sides[p].active;
                 a.pt_dur = 2;
                 a.pt_maybe_locked = false;
-                a.pt_source = self.sides[source].order[0];
+                a.pt_source = pt_source;
                 if source == p {
                     // (never happens: the trapper is the foe)
                 }
@@ -504,6 +505,7 @@ impl Battle {
 
     /// The active's volatiles in insertion order.
     pub fn vol_order(&self, p: Player) -> VolIter {
+        assert!(p < 2, "player {p} out of range (0 or 1)");
         self.vols_in_order(p, u32::MAX)
     }
 

@@ -161,7 +161,7 @@ impl Battle {
             }
         }
         let mut b = Battle {
-            sides: [Side::new(p1), Side::new(p2)],
+            sides: Sides([Side::new(p1), Side::new(p2)]),
             rng,
             turn: 0,
             last_damage: 0,
@@ -234,6 +234,7 @@ impl Battle {
     /// Whether `c` is one of `p`'s legal choices: exactly the set `Generation::choices` returns
     /// (no allocation; this is what [`Battle::apply_choices`] validates with).
     pub fn is_legal(&self, p: Player, c: Choice) -> bool {
+        check_player(p);
         if !self.started {
             return c == Choice::Pass;
         }
@@ -507,8 +508,11 @@ impl Battle {
     }
 
     /// The common tail of `runAction` (faints, forced-switch requests, `eachEvent('Update')`).
+    #[inline]
     fn action_tail<S: Sink>(&mut self, _a: Option<Action>, s: &mut S) {
-        self.faint_messages(s);
+        if self.n_faint != 0 {
+            self.faint_messages(s);
+        }
         if self.ended {
             return;
         }
@@ -535,6 +539,7 @@ impl Battle {
 
     /// `possibleSwitches(side).length`.
     pub fn can_switch(&self, p: Player) -> usize {
+        check_player(p);
         let sd = &self.sides[p];
         if sd.left == 0 {
             return 0;
@@ -544,6 +549,7 @@ impl Battle {
 
     /// `Battle#eachEvent` for events without Gen 1 handlers (Update, BeforeTurn): only the
     /// speed sort of the active Pokémon matters, as a tie consumes a PRNG call.
+    #[inline]
     pub(crate) fn each_event(&mut self, label: &'static str) {
         // Only a tie between the two actives consumes the PRNG: different speeds (the common
         // case) need no further checks.
@@ -721,13 +727,14 @@ impl Battle {
     /// `Pokemon#faint`: queue the faint (HP 0).
     pub(crate) fn faint(&mut self, p: Player) {
         let slot = self.sides[p].active_slot();
-        let m = &mut self.sides[p].mons[slot];
+        let sd = &mut self.sides[p];
+        let m = &mut sd.mons[slot];
         if m.fainted() || m.faint_queued() {
             return;
         }
         m.hp = 0;
-        self.sides[p].active.switch_flag = false;
         m.set_faint_queued(true);
+        sd.active.switch_flag = false;
         self.faint_queue[self.n_faint as usize] = Faint { side: p as u8, slot: slot as u8 };
         self.n_faint += 1;
     }
@@ -1027,44 +1034,49 @@ impl Battle {
 
     /// The request's move list and `trapped` flag for the current state (pure; equal to
     /// `getMoveRequestData` once its side effects have been applied by `makeRequest`).
+    #[inline]
     pub fn request_moves(&self, p: Player) -> ([ReqMove; 4], usize, bool) {
-        let mut locked = self.locked_move(p);
-        let hard = locked.is_some();
+        check_player(p);
         let sd = &self.sides[p];
-        if !hard {
-            locked = if sd.mon().maybe_locked() { None } else { self.semi_locked_move(p, true) };
+        let (a, mon) = (&sd.active, sd.mon());
+        let (mut locked, mut hard) = (None, false);
+        if a.vols & (LOCK_VOLS | SEMI_LOCK_VOLS) != 0 {
+            locked = self.locked_move(p);
+            hard = locked.is_some();
+            if !hard {
+                locked = if mon.maybe_locked() { None } else { self.semi_locked_move(p, true) };
+            }
         }
         let mut moves = [ReqMove { id: 0, disabled: false }; 4];
-        let mut n = 0;
+        let mut n;
         if let Some(l) = locked {
             moves[0].id = l;
             n = 1;
         } else {
             let mut valid = false;
-            for i in 0..sd.active.n_slots as usize {
-                let s = sd.slot(i);
+            let n_slots = (a.n_slots as usize).min(4);
+            for (i, m) in moves[..n_slots].iter_mut().enumerate() {
+                let s = if a.is_virt(i) { a.vslots[i] } else { mon.moves[i] };
                 let disabled = s.disabled() || s.pp() == 0;
                 valid |= !disabled;
-                moves[n] = ReqMove { id: s.id, disabled };
-                n += 1;
+                *m = ReqMove { id: s.id, disabled };
             }
-            if !valid {
-                n = 0;
-            }
+            n = if valid { n_slots } else { 0 };
         }
-        let status = sd.mon().status;
-        if locked.is_none() && (matches!(status, st::FRZ | st::SLP) || (sd.active.has(v::PARTIALLYTRAPPED) && !sd.mon().maybe_locked())) {
+        let status = mon.status;
+        if locked.is_none() && (matches!(status, st::FRZ | st::SLP) || (a.has(v::PARTIALLYTRAPPED) && !mon.maybe_locked())) {
             moves[0] = ReqMove { id: req::FIGHT, disabled: false };
             n = 1;
         } else if n == 0 {
             moves[0] = ReqMove { id: pm::STRUGGLE, disabled: false };
             n = 1;
         }
-        (moves, n, hard || sd.mon().trapped())
+        (moves, n, hard || mon.trapped())
     }
 
     /// Legal choices for `player`, as offered by Showdown's request.
     pub fn legal_choices(&self, p: Player, out: &mut [Choice]) -> usize {
+        check_player(p);
         let sd = &self.sides[p];
         let mut n = 0;
         let bench = |out: &mut [Choice], n: &mut usize| {
@@ -1119,6 +1131,13 @@ impl TrapState {
     fn has(&self, id: u8) -> bool {
         self.vols & (1 << id) != 0
     }
+}
+
+/// Public entry points take a [`Player`]; [`Sides`] masks the index, so reject anything but
+/// 0 and 1 here (the simulator itself only uses 0, 1 and `1 - p`).
+#[inline(always)]
+fn check_player(p: Player) {
+    assert!(p < 2, "player {p} out of range (0 or 1)");
 }
 
 /// A validated choice before `commitChoices`.

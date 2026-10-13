@@ -364,19 +364,24 @@ pub struct Side {
 
 impl Side {
     /// Original team slot of the active Pokémon.
+    ///
+    /// `order` entries are always below [`MAX_TEAM`] (`Battle::validate` checks blobs); the
+    /// clamp states that to the optimiser, so indexing `mons` needs no bounds check (and no
+    /// panic path that blocks reusing the address across calls). It is free on aarch64/x86
+    /// (a conditional select).
     #[inline(always)]
     pub fn active_slot(&self) -> usize {
-        self.order[0] as usize
+        (self.order[0] as usize).min(MAX_TEAM - 1)
     }
 
     #[inline(always)]
     pub fn mon(&self) -> &Mon {
-        &self.mons[self.order[0] as usize]
+        &self.mons[self.active_slot()]
     }
 
     #[inline(always)]
     pub fn mon_mut(&mut self) -> &mut Mon {
-        let i = self.order[0] as usize;
+        let i = self.active_slot();
         &mut self.mons[i]
     }
 
@@ -395,7 +400,7 @@ impl Side {
         if self.active.is_virt(i) {
             &mut self.active.vslots[i]
         } else {
-            let a = self.order[0] as usize;
+            let a = self.active_slot();
             &mut self.mons[a].moves[i]
         }
     }
@@ -416,6 +421,41 @@ impl Side {
         } else {
             self.mons[i].stats[5]
         }
+    }
+}
+
+/// The two sides, indexed by [`sim_core::Player`].
+///
+/// Indexing masks the player to 0/1 instead of bounds-checking it: the simulator only ever
+/// indexes with 0, 1 or `1 - p`, and the public entry points check the player once. This
+/// removes a branch (and a panic path that blocks optimisation) from every side access.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Sides(pub [Side; 2]);
+
+impl std::ops::Index<usize> for Sides {
+    type Output = Side;
+    #[inline(always)]
+    fn index(&self, p: usize) -> &Side {
+        &self.0[p & 1]
+    }
+}
+
+impl std::ops::IndexMut<usize> for Sides {
+    #[inline(always)]
+    fn index_mut(&mut self, p: usize) -> &mut Side {
+        &mut self.0[p & 1]
+    }
+}
+
+impl Sides {
+    #[inline]
+    pub fn iter(&self) -> std::slice::Iter<'_, Side> {
+        self.0.iter()
+    }
+
+    #[inline]
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, Side> {
+        self.0.iter_mut()
     }
 }
 
@@ -560,7 +600,7 @@ pub struct Faint {
 /// The whole battle: a plain `Copy` value (memcpy to clone).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Battle {
-    pub sides: [Side; 2],
+    pub sides: Sides,
     pub rng: Prng,
     pub turn: u16,
     /// `battle.lastDamage`.

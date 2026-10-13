@@ -151,6 +151,14 @@ bin_struct!(Rules { sleep_clause, freeze_clause, compat });
 bin_struct!(Action { kind, order, priority, speed, side, data });
 bin_struct!(Queue { len, list });
 bin_struct!(Faint { side, slot });
+impl Bin for Sides {
+    fn put(&self, o: &mut Vec<u8>) {
+        self.0.put(o);
+    }
+    fn get(i: &mut &[u8]) -> Option<Self> {
+        Some(Sides(Bin::get(i)?))
+    }
+}
 bin_struct!(Battle {
     sides, rng, turn, last_damage, rules, queue, mid_turn, started, ended, winner, faint_queue, n_faint,
 });
