@@ -487,11 +487,12 @@ impl Battle {
         let a = &self.sides[p].active;
         let mut ids = [0u8; v::COUNT];
         let mut n = 0;
-        for id in 0..v::COUNT as u8 {
-            if a.has(id) {
-                ids[n] = id;
-                n += 1;
-            }
+        let mut bits = a.vols;
+        while bits != 0 {
+            let id = bits.trailing_zeros() as u8;
+            bits &= bits - 1;
+            ids[n] = id;
+            n += 1;
         }
         // Stamps increase with insertion (wrapping is irrelevant: < 256 adds per switch-in).
         ids[..n].sort_by_key(|&id| a.vstamp[id as usize]);

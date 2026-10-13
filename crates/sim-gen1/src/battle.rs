@@ -867,14 +867,29 @@ impl Battle {
     /// `Pokemon#getMoveRequestData` for the active Pokémon: applies its side effects (trapped,
     /// maybeLocked) and returns the request's move list and whether it is `trapped`.
     pub(crate) fn move_request_data(&mut self, p: Player) -> ([ReqMove; 4], usize, bool) {
+        // Side effects first (idempotent): a hard lock traps; otherwise maybeDisabled feeds
+        // maybeLocked (Gen 1 never sets maybeDisabled, so the request is unaffected by order).
+        let hard = self.locked_move(p).is_some();
+        let a = &mut self.sides[p].active;
+        if hard {
+            a.trapped = true;
+            a.maybe_disabled = false;
+            a.maybe_locked = false;
+        } else {
+            a.maybe_locked = a.maybe_locked || a.maybe_disabled;
+        }
+        self.request_moves(p)
+    }
+
+    /// The request's move list and `trapped` flag for the current state (pure; equal to
+    /// `getMoveRequestData` once its side effects have been applied by `makeRequest`).
+    pub(crate) fn request_moves(&self, p: Player) -> ([ReqMove; 4], usize, bool) {
         let mut locked = self.locked_move(p);
         let hard = locked.is_some();
-        if hard {
-            self.sides[p].active.trapped = true;
-        } else {
-            locked = if self.sides[p].active.maybe_locked { None } else { self.semi_locked_move(p, true) };
-        }
         let sd = &self.sides[p];
+        if !hard {
+            locked = if sd.active.maybe_locked { None } else { self.semi_locked_move(p, true) };
+        }
         let mut moves = [ReqMove { id: 0, disabled: false }; 4];
         let mut n = 0;
         if let Some(l) = locked {
@@ -901,17 +916,7 @@ impl Battle {
             moves[0] = ReqMove { id: pm::STRUGGLE, disabled: false };
             n = 1;
         }
-        let a = &mut self.sides[p].active;
-        let trapped;
-        if hard {
-            a.maybe_disabled = false;
-            a.maybe_locked = false;
-            trapped = a.trapped;
-        } else {
-            a.maybe_locked = a.maybe_locked || a.maybe_disabled;
-            trapped = a.trapped;
-        }
-        (moves, n, trapped)
+        (moves, n, hard || sd.active.trapped)
     }
 
     /// Legal choices for `player`, as offered by Showdown's request.
@@ -935,9 +940,7 @@ impl Battle {
                 }
             }
             Request::Move => {
-                // getMoveRequestData is idempotent once applied by makeRequest.
-                let mut tmp = *self;
-                let (moves, m, trapped) = tmp.move_request_data(p);
+                let (moves, m, trapped) = self.request_moves(p);
                 for (i, mv) in moves[..m].iter().enumerate() {
                     if !mv.disabled {
                         out[n] = Choice::Move(i as u8 + 1);

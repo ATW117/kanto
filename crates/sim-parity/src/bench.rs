@@ -19,11 +19,30 @@ use std::time::Instant;
 
 const MAX_TURNS: u32 = 1000;
 
-/// Uniform pick among `n` actions sorted by index; returns the position in the sorted list.
+/// Uniform pick among actions sorted by index; returns the chosen choice's position.
 #[inline]
 fn pick(rng: &mut Rng, idx: &mut [(usize, usize)]) -> usize {
     idx.sort_unstable();
     idx[rng.below(idx.len() as u64) as usize].1
+}
+
+/// (action index, choice position) pairs in a stack buffer.
+struct Idx {
+    n: usize,
+    v: [(usize, usize); 16],
+}
+
+impl Idx {
+    fn new() -> Idx {
+        Idx { n: 0, v: [(0, 0); 16] }
+    }
+    fn push(&mut self, x: (usize, usize)) {
+        self.v[self.n] = x;
+        self.n += 1;
+    }
+    fn pick(&mut self, rng: &mut Rng) -> usize {
+        pick(rng, &mut self.v[..self.n])
+    }
 }
 
 /// One game on libpkmn without logging (pkmn's own fast path). Returns (turns, updates, winner).
@@ -48,8 +67,11 @@ fn play_pkmn_c(b: &mut Gen1Battle, seed: u64, mut on_update: impl FnMut(&Gen1Bat
         let mut cs = [0u8; 2];
         for p in 0..2 {
             let n = Pkmn1::choices(b, p, &mut ch);
-            let mut idx: Vec<(usize, usize)> = (0..n).map(|i| (Pkmn1::action_of(b, p, ch[i]).index(), i)).collect();
-            cs[p] = ch[pick(&mut rng, &mut idx)];
+            let mut idx = Idx::new();
+            for i in 0..n {
+                idx.push((Pkmn1::action_of(b, p, ch[i]).index(), i));
+            }
+            cs[p] = ch[idx.pick(&mut rng)];
         }
         on_choice(Pkmn1::action_of(b, 0, cs[0]), Pkmn1::action_of(b, 1, cs[1]));
         c1 = cs[0];
@@ -86,8 +108,11 @@ fn play_native_c(b: &mut Battle, seed: u64, mut on_update: impl FnMut(&Battle), 
         let mut cs = [Choice::Pass; 2];
         for p in 0..2 {
             let n = b.choices(p, &mut ch);
-            let mut idx: Vec<(usize, usize)> = (0..n).map(|i| (native_action(b, p, ch[i]).index(), i)).collect();
-            cs[p] = ch[pick(&mut rng, &mut idx)];
+            let mut idx = Idx::new();
+            for i in 0..n {
+                idx.push((native_action(b, p, ch[i]).index(), i));
+            }
+            cs[p] = ch[idx.pick(&mut rng)];
         }
         on_choice(native_action(b, 0, cs[0]), native_action(b, 1, cs[1]));
         c1 = cs[0];

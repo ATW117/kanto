@@ -43,6 +43,9 @@ pub enum Kind {
     Rng,
     /// The state differs (with identical PRNG calls).
     State,
+    /// The public event stream the env's reveal memory consumes (moves used with `[from]`,
+    /// switches, `cant` reasons) differs from Showdown's protocol log.
+    Events,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -162,8 +165,9 @@ pub fn replay(spec: &Spec, trace: &Trace) -> Replay {
         }
         let c = [Choice::parse(&st.choices[0]).unwrap_or_default(), Choice::parse(&st.choices[1]).unwrap_or_default()];
         let mut nb = b;
+        let mut events: Vec<sim_core::Event> = Vec::new();
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            nb.apply_choices(c[0], c[1], &mut ());
+            nb.apply_choices(c[0], c[1], &mut events);
             nb
         }));
         match res {
@@ -200,6 +204,14 @@ pub fn replay(spec: &Spec, trace: &Trace) -> Replay {
             d.push_str(&format!("log:\n{}\n", st.log.join("\n")));
             trace::stop();
             return diverge(&b, i, Kind::Rng, cat, d, st);
+        }
+        let (sd_ev, our_ev) = (log_events(&st.log), sim_events(&events));
+        if sd_ev != our_ev {
+            let k = sd_ev.iter().zip(&our_ev).position(|(a, b)| a != b).unwrap_or(sd_ev.len().min(our_ev.len()));
+            let cat = format!("events: showdown {} ours {}", sd_ev.get(k).map(|s| s.as_str()).unwrap_or("-"), our_ev.get(k).map(|s| s.as_str()).unwrap_or("-"));
+            let d = format!("choices {:?}\nshowdown {sd_ev:?}\nours     {our_ev:?}\nlog:\n{}\n", st.choices, st.log.join("\n"));
+            trace::stop();
+            return diverge(&b, i, Kind::Events, cat, d, st);
         }
         let ours = snapshot(&b);
         let mut diffs = Vec::new();
@@ -293,4 +305,66 @@ impl Compact {
         }
         Ok(())
     }
+}
+
+// ---- Event stream check ---------------------------------------------------------------------
+
+/// Public events from Showdown's log, normalised: `p1 move bodyslam [from]`, `p2 switch`,
+/// `p1 cant slp`.
+fn log_events(log: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut skip = false;
+    for l in log {
+        // `|split|pN` is followed by the secret (exact-HP) copy and then the public copy.
+        if std::mem::take(&mut skip) {
+            continue;
+        }
+        if l.starts_with("|split|") {
+            skip = true;
+            continue;
+        }
+        let parts: Vec<&str> = l.split('|').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let who = &parts[2][..2.min(parts[2].len())];
+        match parts[1] {
+            "move" if parts.len() >= 4 => {
+                let from = parts[4..].iter().any(|x| x.starts_with("[from]"));
+                out.push(format!("{who} move {}{}", sim_data::to_id(parts[3]), if from { " [from]" } else { "" }));
+            }
+            "switch" | "drag" => out.push(format!("{who} switch")),
+            "cant" if parts.len() >= 4 => out.push(format!("{who} cant {}", sim_data::to_id(parts[3]))),
+            _ => {}
+        }
+    }
+    out
+}
+
+fn sim_events(ev: &[sim_core::Event]) -> Vec<String> {
+    use sim_core::{Cant, Event};
+    let mut out = Vec::new();
+    for e in ev {
+        match *e {
+            Event::Move { player, mv, from, .. } => {
+                let id = sim_gen1::state::move_id_str(mv);
+                out.push(format!("p{} move {id}{}", player + 1, if from { " [from]" } else { "" }));
+            }
+            Event::Switch { player, .. } => out.push(format!("p{} switch", player + 1)),
+            Event::Cant { player, reason, .. } => {
+                let r = match reason {
+                    Cant::Sleep => "slp",
+                    Cant::Freeze => "frz",
+                    Cant::Paralysis => "par",
+                    Cant::PartiallyTrapped => "partiallytrapped",
+                    Cant::Flinch => "flinch",
+                    Cant::Disable => "disable",
+                    Cant::Recharge => "recharge",
+                };
+                out.push(format!("p{} cant {r}", player + 1));
+            }
+            _ => {}
+        }
+    }
+    out
 }
