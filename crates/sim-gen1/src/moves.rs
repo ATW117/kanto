@@ -45,6 +45,41 @@ const BEFORE_MOVE_VOLS: u32 = 1 << v::PARTIALLYTRAPPED
     | 1 << v::PARTIALTRAPPINGLOCK
     | 1 << v::BIDE;
 
+/// Per-move flags (`MOVE_FLAGS[id]`), so the hot path tests a bit instead of scanning lists.
+const F_TWO_TURN: u8 = 1;
+const F_SKIP_LASTDAMAGE: u8 = 2;
+static MOVE_FLAGS: [u8; 256] = {
+    let mut f = [0u8; 256];
+    let mut i = 0;
+    while i < TWO_TURN.len() {
+        f[TWO_TURN[i] as usize] |= F_TWO_TURN;
+        i += 1;
+    }
+    let mut i = 0;
+    while i < SKIP_LASTDAMAGE.len() {
+        f[SKIP_LASTDAMAGE[i] as usize] |= F_SKIP_LASTDAMAGE;
+        i += 1;
+    }
+    f
+};
+
+/// One of the six two-turn moves (`TWO_TURN`).
+#[inline(always)]
+fn is_two_turn(id: u8) -> bool {
+    MOVE_FLAGS[id as usize] & F_TWO_TURN != 0
+}
+
+/// Gen 1's "no move" ActiveMove: Fissure's data with 102 BP, typeless, Special, 10 PP.
+static NOMOVE_DATA: std::sync::LazyLock<sim_data::MoveData> = std::sync::LazyLock::new(|| {
+    let mut d = MOVES[mv::FISSURE as usize];
+    d.base_power = 102;
+    d.ohko = false;
+    d.type_ = data::TYPELESS;
+    d.category = 1;
+    d.pp = 10;
+    d
+});
+
 const TYPE_NORMAL: u8 = 0;
 const TYPE_FIGHTING: u8 = 1;
 const TYPE_GHOST: u8 = 7;
@@ -55,7 +90,7 @@ const TYPE_GRASS: u8 = 10;
 pub(crate) struct Mv {
     /// Move id; `pm::NOMOVE_HACK` for Gen 1's "no move" Fissure-alike.
     pub id: u8,
-    pub d: sim_data::MoveData,
+    pub d: &'static sim_data::MoveData,
     /// Accuracy in percent (`None` = `true`).
     pub accuracy: Option<f64>,
     pub hit: u8,
@@ -67,15 +102,9 @@ pub(crate) struct Mv {
 impl Mv {
     pub fn new(id: u8) -> Mv {
         if id == pm::NOMOVE {
-            let mut d = MOVES[mv::FISSURE as usize];
-            d.base_power = 102;
-            d.ohko = false;
-            d.type_ = data::TYPELESS;
-            d.category = 1;
-            d.pp = 10;
-            return Mv { id: pm::NOMOVE_HACK, d, accuracy: Some(100.0 * 81.0 / 256.0), hit: 0, last_hit: false, fixed: None };
+            return Mv { id: pm::NOMOVE_HACK, d: &NOMOVE_DATA, accuracy: Some(100.0 * 81.0 / 256.0), hit: 0, last_hit: false, fixed: None };
         }
-        let d = MOVES[id as usize];
+        let d = &MOVES[id as usize];
         let accuracy = if d.accuracy == 0 { None } else { Some(d.accuracy as f64) };
         Mv { id, d, accuracy, hit: 0, last_hit: false, fixed: None }
     }
@@ -187,7 +216,7 @@ impl Battle {
             if locked.is_some() {
                 source_effect = Some(id);
             }
-            if (locked.is_none() && !TWO_TURN.contains(&id)) || self.sides[p].active.has(v::TWOTURNMOVE) {
+            if (locked.is_none() && !is_two_turn(id)) || self.sides[p].active.has(v::TWOTURNMOVE) {
                 self.deduct_pp(p, 1);
             }
         }
@@ -197,6 +226,10 @@ impl Battle {
 
     /// `runEvent('BeforeMove', pokemon, target, move)`; false = the move is aborted.
     fn before_move<S: Sink>(&mut self, p: Player, target: Player, id: u8, s: &mut S) -> bool {
+        // No handler present (no FRZ/SLP/PAR, no BeforeMove volatile): nothing to sort or run.
+        if !matches!(self.sides[p].mon().status, st::FRZ | st::SLP | st::PAR) && self.sides[p].active.vols & BEFORE_MOVE_VOLS == 0 {
+            return true;
+        }
         let mut list = [(0u64, 0u8); 8];
         let mut n = 0;
         let speed = self.sides[p].active.speed;
@@ -358,7 +391,7 @@ impl Battle {
             target = p;
         }
         if matches!(source_effect, Some(mv::METRONOME) | Some(mv::MIRRORMOVE)) {
-            if TWO_TURN.contains(&m.id) {
+            if is_two_turn(m.id) {
                 self.deduct_pp(p, -1);
             }
             let sd = &mut self.sides[p];
@@ -371,7 +404,7 @@ impl Battle {
         let side_id = if m.id == pm::NOMOVE_HACK { pm::NOMOVE_HACK } else { m.id };
         self.sides[p].last_move = side_id;
         self.sides[p].last_enemy_move = side_id;
-        if !TWO_TURN.contains(&m.id) || self.sides[p].active.has(v::TWOTURNMOVE) {
+        if !is_two_turn(m.id) || self.sides[p].active.has(v::TWOTURNMOVE) {
             let a = &mut self.sides[p].active;
             a.last_move = m.real_id();
             a.move_this_turn = m.real_id();
@@ -418,7 +451,7 @@ impl Battle {
         if self.sides[target].mon().fainted() {
             return;
         }
-        if !SKIP_LASTDAMAGE.contains(&m.id) {
+        if MOVE_FLAGS[m.id as usize] & F_SKIP_LASTDAMAGE == 0 {
             self.last_damage = 0;
         }
         let damage = self.try_move_hit(target, p, m, s);

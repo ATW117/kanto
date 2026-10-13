@@ -452,6 +452,9 @@ impl Battle {
 
     /// `runEvent('DisableMove', pokemon)` at end of turn.
     pub(crate) fn disable_move_event(&mut self, p: Player) {
+        if !matches!(self.sides[p].mon().status, st::SLP | st::FRZ) && self.sides[p].active.vols & DISABLE_MOVE_VOLS == 0 {
+            return;
+        }
         let mut list = [(0u64, 0u8); 8];
         let mut n = 0;
         let status = self.sides[p].mon().status;
@@ -528,6 +531,10 @@ impl Battle {
 
     /// `fieldEvent('Residual')`: duration countdown of Gen 1's duration-based volatiles.
     pub(crate) fn residual_event<S: Sink>(&mut self, s: &mut S) {
+        // (An unstarted side has no volatiles.)
+        if (self.sides[0].active.vols | self.sides[1].active.vols) & DURATION_VOLS == 0 {
+            return;
+        }
         let mut list = [(0u64, (0u8, 0u8)); 8];
         let mut n = 0;
         for p in 0..2 {
@@ -601,6 +608,10 @@ impl Battle {
     /// `runEvent('AfterMoveSelf', pokemon)`: residualdmg counter (100), sleep wake-up (3),
     /// PSN/BRN/TOX damage (2), Leech Seed (1).
     pub(crate) fn after_move_self<S: Sink>(&mut self, p: Player, s: &mut S) {
+        const VOLS: u32 = 1 << v::LEECHSEED | 1 << v::RESIDUALDMG;
+        if !matches!(self.sides[p].mon().status, st::SLP | st::PSN | st::BRN | st::TOX) && self.sides[p].active.vols & VOLS == 0 {
+            return;
+        }
         let mut list = [(0u64, 0u8); 4];
         let mut n = 0;
         let status = self.sides[p].mon().status;
@@ -615,7 +626,7 @@ impl Battle {
             }
             _ => {}
         }
-        for id in self.vols_in_order(p, 1 << v::LEECHSEED | 1 << v::RESIDUALDMG) {
+        for id in self.vols_in_order(p, VOLS) {
             let prio = match id {
                 v::LEECHSEED => 1,
                 v::RESIDUALDMG => 100,
@@ -689,9 +700,13 @@ impl Battle {
     /// `runEvent('AfterMove', pokemon, target)`: Wrap lock bookkeeping, Hyper Beam recharge
     /// message, Thrash end. `target_alive` is `target.hp > 0`; the target is always the foe.
     pub(crate) fn after_move<S: Sink>(&mut self, p: Player, target: Player, _s: &mut S) {
+        const VOLS: u32 = 1 << v::PARTIALTRAPPINGLOCK | 1 << v::MUSTRECHARGE | 1 << v::LOCKEDMOVE;
+        if self.sides[p].active.vols & VOLS == 0 {
+            return;
+        }
         let mut list = [(0u64, 0u8); 4];
         let mut n = 0;
-        for id in self.vols_in_order(p, 1 << v::PARTIALTRAPPINGLOCK | 1 << v::MUSTRECHARGE | 1 << v::LOCKEDMOVE) {
+        for id in self.vols_in_order(p, VOLS) {
             list[n] = (self.hkey(p, 0, SUB_CONDITION), id);
             n += 1;
         }

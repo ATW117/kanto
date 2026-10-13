@@ -83,7 +83,7 @@ MUTANTS = [
     ("rest-255-bug-removed", G + "moves.rs", "if (hp == max - 255 || hp == max - 511) && hp % 256 != 0 {", "if false {", ""),
     # -- PP
     ("pp-no-wrap", G + "moves.rs", "slot.set_pp((slot.pp() as i32 - amount).rem_euclid(64) as u8);", "slot.set_pp((slot.pp() as i32 - amount).clamp(0, 63) as u8);", ""),
-    ("pp-twoturn-both", G + "moves.rs", "if (locked.is_none() && !TWO_TURN.contains(&id)) || self.sides[p].active.has(v::TWOTURNMOVE) {", "if locked.is_none() || self.sides[p].active.has(v::TWOTURNMOVE) {", ""),
+    ("pp-twoturn-both", G + "moves.rs", "if (locked.is_none() && !is_two_turn(id)) || self.sides[p].active.has(v::TWOTURNMOVE) {", "if locked.is_none() || self.sides[p].active.has(v::TWOTURNMOVE) {", ""),
     ("pp-metronome-refund", G + "moves.rs", "slot.set_pp((slot.pp() + 1) % 64);", "slot.set_pp(slot.pp() % 64);", "Metronome/Mirror PP refund"),
     ("pp-transform-5to4", G + "moves.rs", "MoveSlot::new(id, MOVES[id as usize].pp.min(5))", "MoveSlot::new(id, MOVES[id as usize].pp.min(4))", ""),
     ("transform-mimic-pp-writeback", G + "moves.rs", "if sd.active.is_virt(i) && !sd.active.transformed && i < sd.mon().n_moves as usize {", "if sd.active.is_virt(i) && i < sd.mon().n_moves as usize {", ""),

@@ -529,13 +529,14 @@ impl Queue {
         self.list[index] = a;
         self.len += 1;
     }
+    #[inline]
     pub fn shift(&mut self) -> Option<Action> {
         if self.len == 0 {
             return None;
         }
         let a = self.list[0];
-        let n = self.len as usize;
-        self.list.copy_within(1..n, 0);
+        // A fixed-size move (inlined; the stale tail past `len` is never read).
+        self.list.copy_within(1..QUEUE_CAP, 0);
         self.len -= 1;
         Some(a)
     }
