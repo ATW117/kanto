@@ -1,0 +1,10 @@
+[package]
+name = "pkmn-sys"
+description = "Raw FFI bindings to libpkmn (pkmn/engine) for Generation I, Showdown mode, with protocol logs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+links = "pkmn-showdown"
+build = "build.rs"
+
+[dependencies]

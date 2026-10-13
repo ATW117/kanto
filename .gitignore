@@ -1,0 +1,24 @@
+# Rust
+target/
+**/*.rs.bk
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+*.so
+*.pyd
+dist/
+build/
+
+# Zig
+.zig-cache/
+zig-cache/
+zig-out/
+
+# Misc
+*.dSYM/
+.DS_Store
+bench/results/

@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = ["crates/pkmn-sys", "crates/battle-env", "crates/pokemon-env-py"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = false
+
+[profile.bench]
+inherits = "release"

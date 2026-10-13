@@ -1,0 +1,24 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "pokemon-env"
+version = "0.1.0"
+description = "Fast batched Gen 1 Pokémon battle environment backed by pkmn/engine"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+gym = ["gymnasium>=0.29"]
+test = ["pytest>=8", "gymnasium>=0.29"]
+
+[tool.maturin]
+manifest-path = "crates/pokemon-env-py/Cargo.toml"
+python-source = "python"
+module-name = "pokemon_env._pokemon_env"
+features = ["pyo3/extension-module"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]

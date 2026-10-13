@@ -1,0 +1,34 @@
+[
+  {"name": "builtin/standard-1", "source": "hand-written fixture (classic RBY OU core)", "pokemon": [
+    {"species": "Alakazam", "moves": ["Psychic", "Seismic Toss", "Thunder Wave", "Recover"], "level": 100},
+    {"species": "Chansey", "moves": ["Ice Beam", "Thunderbolt", "Thunder Wave", "Soft-Boiled"], "level": 100},
+    {"species": "Snorlax", "moves": ["Body Slam", "Reflect", "Rest", "Ice Beam"], "level": 100},
+    {"species": "Tauros", "moves": ["Body Slam", "Hyper Beam", "Blizzard", "Earthquake"], "level": 100},
+    {"species": "Exeggutor", "moves": ["Sleep Powder", "Psychic", "Explosion", "Double-Edge"], "level": 100},
+    {"species": "Starmie", "moves": ["Psychic", "Blizzard", "Thunder Wave", "Recover"], "level": 100}
+  ]},
+  {"name": "builtin/standard-2", "source": "hand-written fixture (classic RBY OU core)", "pokemon": [
+    {"species": "Jynx", "moves": ["Lovely Kiss", "Blizzard", "Psychic", "Rest"], "level": 100},
+    {"species": "Chansey", "moves": ["Seismic Toss", "Thunder Wave", "Soft-Boiled", "Reflect"], "level": 100},
+    {"species": "Snorlax", "moves": ["Body Slam", "Hyper Beam", "Earthquake", "Self-Destruct"], "level": 100},
+    {"species": "Tauros", "moves": ["Body Slam", "Hyper Beam", "Blizzard", "Earthquake"], "level": 100},
+    {"species": "Zapdos", "moves": ["Thunderbolt", "Drill Peck", "Thunder Wave", "Agility"], "level": 100},
+    {"species": "Rhydon", "moves": ["Earthquake", "Rock Slide", "Body Slam", "Substitute"], "level": 100}
+  ]},
+  {"name": "builtin/standard-3", "source": "hand-written fixture (classic RBY OU core)", "pokemon": [
+    {"species": "Gengar", "moves": ["Hypnosis", "Thunderbolt", "Night Shade", "Explosion"], "level": 100},
+    {"species": "Starmie", "moves": ["Surf", "Thunderbolt", "Thunder Wave", "Recover"], "level": 100},
+    {"species": "Snorlax", "moves": ["Body Slam", "Amnesia", "Blizzard", "Rest"], "level": 100},
+    {"species": "Tauros", "moves": ["Body Slam", "Hyper Beam", "Blizzard", "Earthquake"], "level": 100},
+    {"species": "Golem", "moves": ["Earthquake", "Rock Slide", "Body Slam", "Explosion"], "level": 100},
+    {"species": "Lapras", "moves": ["Blizzard", "Thunderbolt", "Body Slam", "Confuse Ray"], "level": 100}
+  ]},
+  {"name": "builtin/standard-4", "source": "hand-written fixture (classic RBY OU core)", "pokemon": [
+    {"species": "Starmie", "moves": ["Psychic", "Blizzard", "Thunder Wave", "Recover"], "level": 100},
+    {"species": "Alakazam", "moves": ["Psychic", "Seismic Toss", "Thunder Wave", "Recover"], "level": 100},
+    {"species": "Chansey", "moves": ["Ice Beam", "Thunder", "Thunder Wave", "Soft-Boiled"], "level": 100},
+    {"species": "Snorlax", "moves": ["Body Slam", "Reflect", "Rest", "Earthquake"], "level": 100},
+    {"species": "Tauros", "moves": ["Body Slam", "Hyper Beam", "Blizzard", "Earthquake"], "level": 100},
+    {"species": "Cloyster", "moves": ["Clamp", "Blizzard", "Explosion", "Hyper Beam"], "level": 100}
+  ]}
+]

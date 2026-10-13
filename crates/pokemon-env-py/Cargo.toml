@@ -1,0 +1,15 @@
+[package]
+name = "pokemon-env-py"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "_pokemon_env"
+crate-type = ["cdylib"]
+
+[dependencies]
+battle-env = { path = "../battle-env" }
+numpy = "0.29.0"
+pyo3 = { version = "0.29", features = ["extension-module", "abi3-py310"] }
