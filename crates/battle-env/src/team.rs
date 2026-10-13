@@ -48,6 +48,10 @@ pub struct Mon {
     pub level: u8,
     /// [hp, atk, def, spe, spc]
     pub stats: [u16; 5],
+    /// DVs [atk, def, spe, spc] (the HP DV is derived) and stat experience [hp, atk, def, spe, spc]
+    /// the stats were computed from (needed by backends that rebuild Showdown sets).
+    pub dvs: [u8; 4],
+    pub exp: [u16; 5],
 }
 
 /// A validated team (1-6 Pokémon). Fixed size, no heap.
@@ -57,7 +61,7 @@ pub struct Team {
     pub mons: [Mon; MAX_PARTY],
 }
 
-const EMPTY_MON: Mon = Mon { species: 0, moves: [0; 4], level: 0, stats: [0; 5] };
+const EMPTY_MON: Mon = Mon { species: 0, moves: [0; 4], level: 0, stats: [0; 5], dvs: [0; 4], exp: [0; 5] };
 
 impl Mon {
     /// Build a Pokémon from ids, computing stats from DVs (atk, def, spe, spc) and stat exp
@@ -74,7 +78,7 @@ impl Mon {
         }
         let mut m = [0u8; 4];
         m[..moves.len()].copy_from_slice(moves);
-        Mon { species, moves: m, level, stats }
+        Mon { species, moves: m, level, stats, dvs, exp }
     }
 
     /// Max-DV, max-stat-exp Pokémon at the given level.

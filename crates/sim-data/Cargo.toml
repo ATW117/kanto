@@ -1,0 +1,8 @@
+[package]
+name = "sim-data"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Per-generation data tables generated from Pokémon Showdown's dex."
+
+[dependencies]

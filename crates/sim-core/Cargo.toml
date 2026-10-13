@@ -1,0 +1,13 @@
+[package]
+name = "sim-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Generation-independent pieces of the native simulator: Showdown's PRNG, speed sorting, choices."
+
+[features]
+# Record every PRNG call (label, range, result) in a thread-local buffer. Used by the parity
+# harness to locate the first RNG divergence; compiled out otherwise.
+trace = []
+
+[dependencies]

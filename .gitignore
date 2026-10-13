@@ -22,3 +22,6 @@ zig-out/
 *.dSYM/
 .DS_Store
 bench/results/
+
+# Parity harness outputs
+parity/out/
