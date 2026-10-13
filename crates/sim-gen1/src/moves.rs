@@ -680,8 +680,13 @@ impl Battle {
                 did_something = true;
             }
             if volatile != 0 {
-                if self.add_volatile(t, data_vol(volatile), p, m.real_id()) == Some(true) {
+                let vid = data_vol(volatile);
+                if self.add_volatile(t, vid, p, m.real_id()) == Some(true) {
                     did_something = true;
+                    if vid == v::DISABLE {
+                        let a = &self.sides[t].active;
+                        s.event(Event::DisableStart { player: t, slot: self.sides[t].order[0], mv: a.disable_move });
+                    }
                 }
             }
             // singleEvent('Hit', moveData)

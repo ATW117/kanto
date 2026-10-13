@@ -11,6 +11,7 @@ pub mod obs;
 pub mod opponent;
 pub mod pkmn1;
 pub mod protocol;
+pub mod reveal;
 pub mod rng;
 pub mod team;
 pub mod vec_env;

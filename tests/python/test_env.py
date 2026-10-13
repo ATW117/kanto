@@ -144,3 +144,48 @@ def test_gymnasium_wrapper():
             assert r in (-1.0, 0.0, 1.0)
             obs, _ = env.reset()
     assert finished > 0
+
+
+# ---- Native (Showdown-exact) backend ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("backend", ["native", "native-ou"])
+def test_native_backend_rollout(backend):
+    n = 64
+    env = pe.VecEnv(num_envs=n, seed=0, teams="data/teams/gen1ou", threads=2, backend=backend)
+    assert env.backend == backend
+    obs, mask = env.reset()
+    assert obs.shape == (n, 2, pe.OBS_DIM) and mask.any(-1).all()
+    rng = np.random.default_rng(0)
+    games = 0
+    for _ in range(400):
+        obs, mask, reward, done, info = env.step(sample_legal(mask, rng))
+        assert np.isfinite(obs).all() and mask.any(-1).all()
+        games += int(done.sum())
+        assert np.array_equal(reward[:, 0], -reward[:, 1])
+    assert games > n
+
+
+def test_native_backend_deterministic_and_clonable():
+    def run(threads):
+        env = pe.VecEnv(num_envs=16, seed=9, teams="randbats", threads=threads, backend="native")
+        _, mask = env.reset()
+        rng = np.random.default_rng(4)
+        acc = []
+        for _ in range(60):
+            obs, mask, *_ = env.step(sample_legal(mask, rng))
+            acc.append(obs.copy())
+        return env, mask, np.stack(acc)
+
+    env, mask, a = run(1)
+    assert np.array_equal(a, run(3)[2])
+    blob = env.clone_state(3)
+    env.restore_state(3, blob)
+    assert env.clone_state(3) == blob
+    with pytest.raises(ValueError):
+        env.restore_state(0, b"junk")
+
+
+def test_unknown_backend_rejected():
+    with pytest.raises(ValueError):
+        pe.VecEnv(num_envs=1, backend="nope")

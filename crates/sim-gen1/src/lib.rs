@@ -9,6 +9,7 @@
 mod battle;
 mod events;
 mod moves;
+pub mod ser;
 pub mod state;
 
 pub use battle::{calc_pp, calc_stats, req, MonSpec, ReqMove};

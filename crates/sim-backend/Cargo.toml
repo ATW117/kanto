@@ -3,5 +3,10 @@ name = "sim-backend"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "battle-env Backend implementations backed by the native simulator."
 
 [dependencies]
+battle-env = { path = "../battle-env" }
+sim-core = { path = "../sim-core" }
+sim-data = { path = "../sim-data" }
+sim-gen1 = { path = "../sim-gen1" }

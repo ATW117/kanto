@@ -86,6 +86,14 @@ struct Report {
     steps_before_divergence_mean: f64,
     divergence_rate: f64,
     categories: Vec<(String, usize, String)>,
+    /// Move name -> uses in steps that matched Showdown (verification coverage).
+    move_coverage: BTreeMap<String, usize>,
+    /// How the compared battles ended: "p1"/"p2"/"tie"/"unfinished", plus "turn-limit" and
+    /// "endless-clause" counts, and the longest battle (turns).
+    endings: BTreeMap<String, usize>,
+    max_turn: u64,
+    /// Protocol events (`-start` volatiles, `-status`, `cant` reasons) seen in matched steps.
+    event_coverage: BTreeMap<String, usize>,
     kinds: BTreeMap<String, usize>,
     moves_at_divergence: Vec<(String, usize)>,
 }
@@ -119,7 +127,13 @@ fn fuzz(args: &Args) {
     let repo = repo_root();
     let sd = runner::Showdown::locate(&repo, args.kv.get("ps-dir").map(|s| s.as_str())).unwrap_or_else(|e| panic!("{e}"));
     let mut rng = Rng::new(seed);
-    let specs: Vec<Spec> = (0..n).map(|i| random_spec(format!("s{seed}-{i}"), &mut rng, kind, &format, &patch)).collect();
+    let prng = args.get("prng", "gen5");
+    let mut specs: Vec<Spec> = (0..n).map(|i| random_spec(format!("s{seed}-{i}"), &mut rng, kind, &format, &patch, &prng)).collect();
+    if let Some(ms) = args.kv.get("max-steps") {
+        for s in specs.iter_mut() {
+            s.max_steps = Some(ms.parse().expect("--max-steps"));
+        }
+    }
     let started = std::time::Instant::now();
     let mut report = Report { battles: n, ..Default::default() };
     let mut failures: BTreeMap<String, Vec<Failure>> = BTreeMap::new();
@@ -143,7 +157,47 @@ fn fuzz(args: &Args) {
             errors.push(format!("{}: {}", specs[i].id, e.lines().next().unwrap_or("")));
             return;
         }
-        match replay(&specs[i], &trace) {
+        let res = replay(&specs[i], &trace);
+        if let Some(end) = &trace.end {
+            let w = end.get("winner").and_then(|w| w.as_str()).unwrap_or("");
+            let ended = end.get("ended").and_then(|e| e.as_bool()).unwrap_or(false);
+            let key = if !ended { "unfinished" } else if w.is_empty() { "tie" } else { w };
+            *report.endings.entry(key.to_string()).or_default() += 1;
+            let turn = end.get("turn").and_then(|t| t.as_u64()).unwrap_or(0);
+            report.max_turn = report.max_turn.max(turn);
+            if let Some(last) = trace.steps.last() {
+                if last.log.iter().any(|l| l.contains("turn limit")) {
+                    *report.endings.entry("turn-limit".into()).or_default() += 1;
+                }
+                if last.log.iter().any(|l| l.contains("Endless Battle Clause activated")) {
+                    *report.endings.entry("endless-clause".into()).or_default() += 1;
+                }
+            }
+        }
+        let upto = match &res {
+            Replay::Match { steps } => *steps,
+            Replay::Diverged(d) => d.step,
+        };
+        for st in &trace.steps[..upto.min(trace.steps.len())] {
+            for l in &st.log {
+                let parts: Vec<&str> = l.split('|').collect();
+                if parts.len() < 3 {
+                    continue;
+                }
+                match parts[1] {
+                    "move" if parts.len() >= 4 => *report.move_coverage.entry(parts[3].to_string()).or_default() += 1,
+                    "-start" | "-status" | "cant" | "-activate" if parts.len() >= 4 => {
+                        let what = parts[3].trim_start_matches("move: ");
+                        *report.event_coverage.entry(format!("{} {}", parts[1], what)).or_default() += 1;
+                    }
+                    "-crit" | "-miss" | "-immune" | "-fail" | "-hitcount" | "-ohko" | "-transform" | "-mustrecharge" | "-curestatus" | "-end" | "-boost" | "-unboost" | "faint" => {
+                        *report.event_coverage.entry(parts[1].to_string()).or_default() += 1
+                    }
+                    _ => {}
+                }
+            }
+        }
+        match res {
             Replay::Match { steps } => {
                 report.matched += 1;
                 report.steps_compared += steps;
@@ -218,6 +272,11 @@ fn print_report(r: &Report, secs: f64, format: &str, patch: &str, teams: &str) {
         100.0 * r.divergence_rate,
         r.showdown_errors
     );
+    println!("endings: {:?}; longest battle {} turns", r.endings, r.max_turn);
+    let mut cov: Vec<(&String, &usize)> = r.move_coverage.iter().collect();
+    cov.sort_by(|a, b| a.1.cmp(b.1));
+    println!("move coverage: {} distinct moves verified; rarest: {}", cov.len(),
+        cov.iter().take(8).map(|(m, k)| format!("{m} {k}")).collect::<Vec<_>>().join(", "));
     if r.diverged > 0 {
         println!("mean steps before divergence: {:.1}; by kind: {:?}", r.steps_before_divergence_mean, r.kinds);
         println!("top categories:");

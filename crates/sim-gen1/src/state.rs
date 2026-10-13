@@ -159,8 +159,8 @@ pub struct Active {
     /// Volatile bitset (`1 << v::*`) and insertion stamps (Showdown iterates `volatiles` in
     /// insertion order, which decides how tied handlers are shuffled).
     pub vols: u32,
-    pub vstamp: [u8; v::COUNT],
-    pub next_stamp: u8,
+    pub vstamp: [u16; v::COUNT],
+    pub next_stamp: u16,
     pub confusion_time: i8,
     pub flinch_dur: u8,
     pub pt_dur: u8,
@@ -174,7 +174,7 @@ pub struct Active {
     pub ptl_total: u8,
     pub ptl_move: u8,
     pub ptl_damage: u32,
-    /// Showdown slot of the Pokémon `partialtrappinglock` targets (`locked`): (side, team slot).
+    /// `partialtrappinglock.locked`: original team slot of the trapped foe.
     pub ptl_locked: u8,
     pub lockedmove_move: u8,
     pub lockedmove_time: i8,
@@ -253,7 +253,7 @@ impl Active {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Side {
     pub mons: [Mon; MAX_TEAM],
     pub n: u8,
@@ -357,6 +357,12 @@ pub struct Action {
     pub side: u8,
     /// Move id (Move), or original team slot of the incoming Pokémon (Switch/InstaSwitch/RunSwitch).
     pub data: u8,
+}
+
+impl Default for Action {
+    fn default() -> Self {
+        Action { kind: ActionKind::Residual, order: 0, priority: 0, speed: 0, side: 0, data: 0 }
+    }
 }
 
 pub const QUEUE_CAP: usize = 8;

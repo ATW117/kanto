@@ -1,4 +1,4 @@
-"""Fast batched Gen 1 singles environment backed by pkmn/engine.
+"""Fast batched Gen 1 singles environment (pkmn/engine or the native Showdown-exact simulator).
 
 See docs/DESIGN.md for the API contract and docs/OBSERVATION.md for the observation layout.
 
@@ -75,6 +75,10 @@ class VecEnv:
         max_turns: games reaching this turn end as truncated ties.
         reveal_hidden: debug only; fill the privileged observation block with the own side's
             hidden counters (sleep/confusion/disable turns left, Substitute HP, Toxic counter).
+        backend: battle simulator. ``"pkmn"`` (default): pkmn/engine in Showdown compatibility
+            mode. ``"native"``: the native Rust simulator, matching vanilla Pokémon Showdown
+            0.11.11 Gen 1 with no clauses (docs/SIM_DESIGN.md). ``"native-ou"``: native with
+            ``[Gen 1] OU``'s Sleep Clause Mod and Freeze Clause Mod.
     """
 
     def __init__(
@@ -86,10 +90,12 @@ class VecEnv:
         opponent: Optional[str] = None,
         max_turns: int = MAX_TURNS,
         reveal_hidden: bool = False,
+        backend: str = "pkmn",
     ) -> None:
         self._env = _native.VecEnv(
-            num_envs, seed, _resolve_teams(teams), threads, opponent, max_turns, reveal_hidden
+            num_envs, seed, _resolve_teams(teams), threads, opponent, max_turns, reveal_hidden, backend
         )
+        self.backend = backend
         self.num_envs = num_envs
         self.obs_dim = OBS_DIM
         self.num_actions = NUM_ACTIONS

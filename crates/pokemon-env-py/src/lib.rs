@@ -10,16 +10,51 @@ use battle_env::backend::NUM_ACTIONS;
 use battle_env::env::EnvConfig;
 use battle_env::obs::{self, OBS_DIM, OBS_VERSION};
 use battle_env::{data, Opponent, Pkmn1, StepOut, TeamSource};
+use sim_backend::{Native1, Native1Ou};
 use numpy::{PyArray1, PyArray2, PyArray3, PyArrayMethods, PyReadonlyArray2, PyUntypedArrayMethods};
 use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
-type Inner = battle_env::VecEnv<Pkmn1>;
+/// The env, monomorphised per simulator backend.
+enum Inner {
+    Pkmn(battle_env::VecEnv<Pkmn1>),
+    Native(battle_env::VecEnv<Native1>),
+    NativeOu(battle_env::VecEnv<Native1Ou>),
+}
+
+/// Dispatch a method call to whichever backend the env uses.
+macro_rules! with_inner {
+    ($inner:expr, $v:ident => $body:expr) => {
+        match $inner {
+            Inner::Pkmn($v) => $body,
+            Inner::Native($v) => $body,
+            Inner::NativeOu($v) => $body,
+        }
+    };
+}
+
+impl Inner {
+    fn new(backend: &str, n: usize, seed: u64, source: TeamSource, cfg: EnvConfig, threads: usize) -> Result<Inner, String> {
+        Ok(match backend {
+            "pkmn" => Inner::Pkmn(battle_env::VecEnv::new(n, seed, source, cfg, threads)),
+            "native" => Inner::Native(battle_env::VecEnv::new(n, seed, source, cfg, threads)),
+            "native-ou" => Inner::NativeOu(battle_env::VecEnv::new(n, seed, source, cfg, threads)),
+            b => return Err(format!("unknown backend '{b}' (expected 'pkmn', 'native' or 'native-ou')")),
+        })
+    }
+    fn num_envs(&self) -> usize {
+        with_inner!(self, v => v.num_envs())
+    }
+    fn cfg(&self) -> &EnvConfig {
+        with_inner!(self, v => &v.cfg)
+    }
+}
 
 #[pyclass(module = "pokemon_env._pokemon_env")]
 struct VecEnv {
     inner: Inner,
+    backend: &'static str,
     obs: Py<PyArray3<f32>>,
     mask: Py<PyArray3<bool>>,
     reward: Py<PyArray2<f32>>,
@@ -32,7 +67,7 @@ struct VecEnv {
 #[pymethods]
 impl VecEnv {
     #[new]
-    #[pyo3(signature = (num_envs, seed=0, teams="data/teams/gen1ou", threads=16, opponent=None, max_turns=1000, reveal_hidden=false))]
+    #[pyo3(signature = (num_envs, seed=0, teams="data/teams/gen1ou", threads=16, opponent=None, max_turns=1000, reveal_hidden=false, backend="pkmn"))]
     fn new(
         py: Python<'_>,
         num_envs: usize,
@@ -42,6 +77,7 @@ impl VecEnv {
         opponent: Option<&str>,
         max_turns: u32,
         reveal_hidden: bool,
+        backend: &str,
     ) -> PyResult<Self> {
         if num_envs == 0 {
             return Err(PyValueError::new_err("num_envs must be > 0"));
@@ -49,10 +85,17 @@ impl VecEnv {
         let source = TeamSource::from_spec(teams).map_err(PyValueError::new_err)?;
         let opponent = opponent.map(Opponent::parse).transpose().map_err(PyValueError::new_err)?;
         let cfg = EnvConfig { max_turns, opponent, reveal_hidden };
-        let inner = py.detach(|| Inner::new(num_envs, seed, source, cfg, threads));
+        let backend: &'static str = match backend {
+            "pkmn" => "pkmn",
+            "native" => "native",
+            "native-ou" => "native-ou",
+            b => return Err(PyValueError::new_err(format!("unknown backend '{b}' (expected 'pkmn', 'native' or 'native-ou')"))),
+        };
+        let inner = py.detach(|| Inner::new(backend, num_envs, seed, source, cfg, threads)).map_err(PyValueError::new_err)?;
         let n = num_envs;
         Ok(VecEnv {
             inner,
+            backend,
             obs: PyArray3::<f32>::zeros(py, [n, 2, OBS_DIM], false).unbind(),
             mask: PyArray3::<bool>::zeros(py, [n, 2, NUM_ACTIONS], false).unbind(),
             reward: PyArray2::<f32>::zeros(py, [n, 2], false).unbind(),
@@ -72,7 +115,7 @@ impl VecEnv {
         // `&mut self`, so no other Rust code touches them while we write.
         let (o, m) = unsafe { (obs.as_slice_mut()?, mask.as_slice_mut()?) };
         let inner = &mut self.inner;
-        py.detach(|| inner.reset(seed, o, m));
+        py.detach(|| with_inner!(inner, v => v.reset(seed, o, m)));
         Ok((self.obs.clone_ref(py), self.mask.clone_ref(py)))
     }
 
@@ -109,7 +152,7 @@ impl VecEnv {
             }
         };
         let inner = &mut self.inner;
-        py.detach(|| inner.step(acts, out)).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        py.detach(|| with_inner!(inner, v => v.step(acts, out).map_err(|e| e.to_string()))).map_err(PyValueError::new_err)?;
         let info = PyDict::new(py);
         info.set_item("outcome", outcome_arr)?;
         info.set_item("turns", turns)?;
@@ -120,21 +163,18 @@ impl VecEnv {
     /// Serialise env `i`'s full state (battle, reveal memories, RNG) to bytes.
     fn clone_state<'py>(&self, py: Python<'py>, i: usize) -> PyResult<Bound<'py, PyBytes>> {
         self.check(i)?;
-        Ok(PyBytes::new(py, &self.inner.clone_state(i)))
+        Ok(PyBytes::new(py, &with_inner!(&self.inner, v => v.clone_state(i))))
     }
 
     /// Restore env `i` from `clone_state` bytes and refresh its rows of the obs/mask buffers.
     fn restore_state(&mut self, py: Python<'_>, i: usize, blob: &[u8]) -> PyResult<()> {
         self.check(i)?;
-        self.inner.restore_state(i, blob).map_err(PyValueError::new_err)?;
+        with_inner!(&mut self.inner, v => v.restore_state(i, blob)).map_err(PyValueError::new_err)?;
         let obs = self.obs.bind(py);
         let mask = self.mask.bind(py);
         let (o, m) = unsafe { (obs.as_slice_mut()?, mask.as_slice_mut()?) };
-        self.inner.observe(
-            i,
-            &mut o[i * 2 * OBS_DIM..(i + 1) * 2 * OBS_DIM],
-            &mut m[i * 2 * NUM_ACTIONS..(i + 1) * 2 * NUM_ACTIONS],
-        );
+        let (o, m) = (&mut o[i * 2 * OBS_DIM..(i + 1) * 2 * OBS_DIM], &mut m[i * 2 * NUM_ACTIONS..(i + 1) * 2 * NUM_ACTIONS]);
+        with_inner!(&self.inner, v => v.observe(i, o, m));
         Ok(())
     }
 
@@ -153,9 +193,15 @@ impl VecEnv {
         NUM_ACTIONS
     }
 
+    /// The simulator backend: "pkmn", "native" or "native-ou".
+    #[getter]
+    fn backend(&self) -> &'static str {
+        self.backend
+    }
+
     #[getter]
     fn opponent(&self) -> Option<&'static str> {
-        self.inner.cfg.opponent.map(|o| match o {
+        self.inner.cfg().opponent.map(|o| match o {
             Opponent::Random => "random",
             Opponent::MaxDamage => "max_damage",
         })
@@ -195,10 +241,15 @@ fn move_names() -> Vec<&'static str> {
 
 /// Engine-only benchmark: `(seconds, updates, turns)` for `battles` random games.
 #[pyfunction]
-#[pyo3(signature = (battles, threads=1, teams="builtin", seed=0))]
-fn bench_engine(py: Python<'_>, battles: usize, threads: usize, teams: &str, seed: u64) -> PyResult<(f64, u64, u64)> {
+#[pyo3(signature = (battles, threads=1, teams="builtin", seed=0, backend="pkmn"))]
+fn bench_engine(py: Python<'_>, battles: usize, threads: usize, teams: &str, seed: u64, backend: &str) -> PyResult<(f64, u64, u64)> {
     let source = TeamSource::from_spec(teams).map_err(PyValueError::new_err)?;
-    Ok(py.detach(|| battle_env::bench::engine_only(&source, battles, threads, seed)))
+    match backend {
+        "pkmn" => Ok(py.detach(|| battle_env::bench::engine_only_with::<Pkmn1>(&source, battles, threads, seed))),
+        "native" => Ok(py.detach(|| battle_env::bench::engine_only_with::<Native1>(&source, battles, threads, seed))),
+        "native-ou" => Ok(py.detach(|| battle_env::bench::engine_only_with::<Native1Ou>(&source, battles, threads, seed))),
+        b => Err(PyValueError::new_err(format!("unknown backend '{b}'"))),
+    }
 }
 
 #[pymodule]

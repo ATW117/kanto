@@ -12,18 +12,26 @@
 // `Compat::Pkmn` mode (and pkmn/engine itself) can be checked against the same reference.
 'use strict';
 
-const PRIORITIES = [
-  ['rule', 'sleepclausemod', 'onSetStatusPriority', -999],
-  ['rule', 'freezeclausemod', 'onSetStatusPriority', -998],
-  ['condition', 'disable', 'onDisableMovePriority', 7],
-];
+// Showdown deep-freezes Condition objects once built, so the condition priority must be set on
+// the dex *data* before the condition is first used: the runner applies the patch once at
+// process start (PS_PATCH=pkmn) and every spec in that process must use the same mode.
+let applied = null;
 
 function setPriorities(dex, on) {
-  for (const [kind, id, field, value] of PRIORITIES) {
-    const effect = kind === 'rule' ? dex.formats.get(id) : dex.conditions.get(id);
-    if (on) effect[field] = value;
-    else delete effect[field];
+  if (applied !== null && applied !== on) {
+    throw new Error('vanilla and pkmn-patched specs cannot share a runner process (set PS_PATCH)');
   }
+  if (applied === on) return;
+  applied = on;
+  if (!on) return;
+  dex.includeData();
+  // Rules with handlers become field pseudo-weathers whose Condition is built from the rulesets
+  // data, so the priority goes on the data (and on the Format object for good measure).
+  for (const [id, prio] of [['sleepclausemod', -999], ['freezeclausemod', -998]]) {
+    dex.data.Rulesets[id].onSetStatusPriority = prio;
+    dex.formats.get(id).onSetStatusPriority = prio;
+  }
+  dex.data.Moves.disable.condition.onDisableMovePriority = 7;
 }
 
 function insertChoice(choices, midTurn = false) {

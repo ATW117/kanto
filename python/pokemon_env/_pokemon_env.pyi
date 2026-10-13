@@ -14,6 +14,7 @@ class VecEnv:
     obs_dim: int
     num_actions: int
     opponent: Optional[str]
+    backend: str
     def __init__(
         self,
         num_envs: int,
@@ -23,6 +24,7 @@ class VecEnv:
         opponent: Optional[str] = None,
         max_turns: int = 1000,
         reveal_hidden: bool = False,
+        backend: str = "pkmn",
     ) -> None: ...
     def reset(self, seed: Optional[int] = None) -> tuple[np.ndarray, np.ndarray]: ...
     def step(

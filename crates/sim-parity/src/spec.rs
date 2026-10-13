@@ -106,7 +106,10 @@ pub enum TeamKind {
     Legal,
     /// Showdown random-battle sets.
     RandBats,
-    /// A mix of the above.
+    /// Stall-prone teams: mostly non-damaging moves, Transform, Ghosts, partial trapping and
+    /// Bide, to reach long battles, the Endless Battle Clause and the 1000-turn limit.
+    Stall,
+    /// A mix of random/legal/randbats (and some stall).
     Mixed,
 }
 
@@ -117,6 +120,7 @@ impl TeamKind {
             "legal" => TeamKind::Legal,
             "randbats" => TeamKind::RandBats,
             "mixed" => TeamKind::Mixed,
+            "stall" => TeamKind::Stall,
             _ => return None,
         })
     }
@@ -128,11 +132,40 @@ fn from_env_team(t: &battle_env::Team) -> Vec<MonSpec> {
 
 pub fn random_team(rng: &mut Rng, kind: TeamKind) -> Vec<MonSpec> {
     let kind = if kind == TeamKind::Mixed {
-        [TeamKind::Random, TeamKind::Legal, TeamKind::RandBats][rng.below(3) as usize]
+        [TeamKind::Random, TeamKind::Legal, TeamKind::RandBats, TeamKind::Random, TeamKind::Legal, TeamKind::RandBats, TeamKind::Stall]
+            [rng.below(7) as usize]
     } else {
         kind
     };
     match kind {
+        TeamKind::Stall => {
+            use sim_data::gen1::mv;
+            const POOL: [u8; 40] = [
+                mv::SPLASH, mv::TELEPORT, mv::ROAR, mv::WHIRLWIND, mv::TRANSFORM, mv::GROWL, mv::LEER, mv::HARDEN,
+                mv::RECOVER, mv::SOFTBOILED, mv::REST, mv::SUBSTITUTE, mv::REFLECT, mv::LIGHTSCREEN, mv::MIST, mv::HAZE,
+                mv::DISABLE, mv::BIDE, mv::COUNTER, mv::WRAP, mv::BIND, mv::FIRESPIN, mv::CLAMP, mv::CONFUSERAY,
+                mv::TOXIC, mv::LEECHSEED, mv::DOUBLETEAM, mv::MINIMIZE, mv::AMNESIA, mv::METRONOME, mv::MIRRORMOVE,
+                mv::MIMIC, mv::CONVERSION, mv::SEISMICTOSS, mv::NIGHTSHADE, mv::SONICBOOM, mv::DRAGONRAGE,
+                mv::PSYWAVE, mv::SUPERFANG, mv::RAGE,
+            ];
+            const GHOSTS_ETC: [u8; 8] = [92, 93, 94, 132, 137, 143, 113, 151];
+            let n = 1 + rng.below(6) as usize;
+            (0..n)
+                .map(|_| {
+                    let species = if rng.below(2) == 0 { GHOSTS_ETC[rng.below(8) as usize] } else { 1 + rng.below(151) as u8 };
+                    let nm = 1 + rng.below(4) as usize;
+                    let mut moves = Vec::new();
+                    while moves.len() < nm {
+                        let m = POOL[rng.below(POOL.len() as u64) as usize];
+                        if !moves.contains(&m) {
+                            moves.push(m);
+                        }
+                    }
+                    let level = if rng.below(3) == 0 { 1 + rng.below(100) as u8 } else { 100 };
+                    MonSpec::from_dvs(species, level, &moves, [15; 4], [65535; 5])
+                })
+                .collect()
+        }
         TeamKind::Legal => from_env_team(&battle_env::team::random_legal_team(rng)),
         TeamKind::RandBats => from_env_team(&battle_env::team::randbats_team(rng)),
         _ => {
@@ -158,15 +191,29 @@ pub fn random_team(rng: &mut Rng, kind: TeamKind) -> Vec<MonSpec> {
     }
 }
 
-/// A random fuzz spec.
-pub fn random_spec(id: String, rng: &mut Rng, kind: TeamKind, format: &str, patch: &str) -> Spec {
+/// A random fuzz spec. `prng`: "gen5" (default), "sodium", or "mixed".
+pub fn random_spec(id: String, rng: &mut Rng, kind: TeamKind, format: &str, patch: &str, prng: &str) -> Spec {
     let p1 = random_team(rng, kind);
     let p2 = random_team(rng, kind);
+    let sodium = match prng {
+        "sodium" => true,
+        "mixed" => rng.below(2) == 0,
+        _ => false,
+    };
+    let seed = if sodium {
+        let mut hex = String::from("sodium,");
+        for _ in 0..16 {
+            hex.push_str(&format!("{:02x}", rng.below(256)));
+        }
+        hex
+    } else {
+        seed_string(rng.next_u64())
+    };
     Spec {
         id,
         format: format.into(),
         patch: patch.into(),
-        seed: seed_string(rng.next_u64()),
+        seed,
         p1: p1.iter().map(SetJson::from_mon).collect(),
         p2: p2.iter().map(SetJson::from_mon).collect(),
         choices: None,

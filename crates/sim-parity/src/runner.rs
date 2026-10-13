@@ -53,6 +53,7 @@ impl Showdown {
             let mut child = Command::new(&self.node)
                 .arg(&self.runner)
                 .env("PS_DIR", &self.ps_dir)
+                .env("PS_PATCH", specs.first().map(|s| s.patch.as_str()).unwrap_or("vanilla"))
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())

@@ -826,7 +826,7 @@ impl Battle {
     /// `Pokemon#getLockedMove` (LockMove handlers in volatile insertion order).
     pub(crate) fn locked_move(&self, p: Player) -> Option<u8> {
         let a = &self.sides[p].active;
-        let mut best: Option<(u8, u8)> = None;
+        let mut best: Option<(u16, u8)> = None;
         for (vol, val) in [
             (v::MUSTRECHARGE, req::RECHARGE),
             (v::LOCKEDMOVE, a.lockedmove_move),
@@ -846,7 +846,7 @@ impl Battle {
         if restrict && a.maybe_locked {
             return None;
         }
-        let mut best: Option<(u8, u8)> = None;
+        let mut best: Option<(u16, u8)> = None;
         for (vol, val) in [(v::PARTIALTRAPPINGLOCK, a.ptl_move), (v::BIDE, data::mv::BIDE)] {
             if a.has(vol) && best.is_none_or(|(st, _)| a.vstamp[vol as usize] < st) {
                 best = Some((a.vstamp[vol as usize], val));

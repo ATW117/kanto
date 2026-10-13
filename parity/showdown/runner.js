@@ -232,6 +232,9 @@ function runSpec(spec) {
 }
 
 async function main() {
+  // Patches that touch frozen dex objects must be applied before any battle runs.
+  if (process.env.PS_PATCH === 'pkmn') patches.generation(Dex.mod('gen1'));
+  else patches.ungeneration(Dex.mod('gen1'));
   const rl = readline.createInterface({input: process.stdin, crlfDelay: Infinity});
   for await (const line of rl) {
     if (!line.trim()) continue;

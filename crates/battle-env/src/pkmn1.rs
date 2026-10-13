@@ -6,9 +6,9 @@
 
 use crate::backend::{Action, Backend, Outcome};
 use crate::data;
-use crate::memory::{Memory, TurnEvents, UNREVEALED};
+use crate::memory::{Memory, UNREVEALED};
 use crate::obs::{status, vol, ActiveView, MonView, View};
-use crate::protocol::{self, Event};
+use crate::protocol;
 use crate::team::{Mon, Team};
 use pkmn_sys::layout::{self as L, volatiles as V};
 use pkmn_sys::{bits, pkmn_gen1_battle, pkmn_gen1_battle_options, pkmn_gen1_log_options};
@@ -164,137 +164,35 @@ pub fn encode_battle(p1: &Team, p2: &Team, seed: u64) -> pkmn_gen1_battle {
 
 /// Apply one update's protocol log to both players' memories (docs/OBSERVATION_RULES.md §3).
 pub fn apply_log(b: &Gen1Battle, log: &[u8], mem: &mut [Memory; 2]) {
-    let mut last = [TurnEvents::default(); 2];
-    let mut attacker: Option<usize> = None;
-    let mut first_mover: Option<usize> = None;
-    for ev in protocol::Parser::new(log) {
-        match ev {
-            Event::Switch { player, slot } => {
-                let obs = &mut mem[1 - player];
-                obs.reveal(slot);
-                obs.opp_transformed = false;
-                for m in mem.iter_mut() {
-                    m.track[player] = Default::default();
-                }
-                last[player].switched = true;
-            }
-            Event::Move { player, slot, mv, from } => {
-                attacker = Some(player);
-                let first = *first_mover.get_or_insert(player) == player;
-                let e = &mut last[player];
-                *e = TurnEvents {
-                    moved: true,
-                    moved_first: first,
-                    mv,
-                    called: from,
-                    switched: e.switched,
-                    ..Default::default()
-                };
-                let obs = &mut mem[1 - player];
-                // Only selections (no `[from]`) reveal a slot and cost PP. Moves used while
-                // transformed are not the user's own; the stored-moveset check also filters
-                // Mimic-copied moves and Struggle.
-                if !from && !obs.opp_transformed && b.stored_moves(player, slot as usize).contains(&mv) {
-                    obs.see_move(slot, mv, true);
-                }
-            }
-            Event::LastMiss => {
-                if let Some(p) = attacker {
-                    last[p].missed = true;
-                }
-            }
-            Event::Miss => {
-                if let Some(p) = attacker {
-                    last[p].missed = true;
-                }
-            }
-            Event::Crit | Event::SuperEffective | Event::Resisted | Event::Immune | Event::Fail => {
-                if let Some(p) = attacker {
-                    let e = &mut last[p];
-                    match ev {
-                        Event::Crit => e.crit = true,
-                        Event::SuperEffective => e.super_effective = true,
-                        Event::Resisted => e.resisted = true,
-                        Event::Immune => e.immune = true,
-                        _ => e.failed = true,
-                    }
-                }
-            }
-            Event::Cant { player, slot, reason, mv } => {
-                last[player].cant = reason + 1;
-                if reason == protocol::cant::SLEEP {
-                    for m in mem.iter_mut() {
-                        let s = &mut m.sleep_obs[player][slot as usize % 6];
-                        *s = s.saturating_add(1);
-                    }
-                }
-                if reason == protocol::cant::DISABLE && b.stored_moves(player, slot as usize).contains(&mv) {
-                    mem[1 - player].see_move(slot, mv, false);
-                }
-            }
-            Event::DisableStart { player, slot, mv } => {
-                if b.stored_moves(player, slot as usize).contains(&mv) {
-                    mem[1 - player].see_move(slot, mv, false);
-                }
-            }
-            Event::MimicStart { player, mv } => {
-                for m in mem.iter_mut() {
-                    m.track[player].mimic_move = mv;
-                }
-                // Mimic copies a random move of the foe's moveset: the Mimic user's owner learns it.
-                let foe = 1 - player;
-                let idx = b.active_idx(foe);
-                if idx != UNREVEALED && b.stored_moves(foe, idx as usize).contains(&mv) {
-                    mem[player].see_move(idx, mv, false);
-                }
-            }
-            Event::Transform { player } => {
-                mem[1 - player].opp_transformed = true;
-                // The transformer's owner now sees the target's full moveset.
-                let foe = 1 - player;
-                let idx = b.active_idx(foe);
-                if idx != UNREVEALED {
-                    for mv in b.stored_moves(foe, idx as usize) {
-                        mem[player].see_move(idx, mv, false);
-                    }
-                }
-            }
-            Event::Turn => {}
-        }
+    crate::reveal::apply_events(b, protocol::Parser::new(log), mem);
+}
+
+impl crate::reveal::RevealSource for Gen1Battle {
+    fn stored_moves(&self, player: usize, idx: usize) -> [u8; 4] {
+        Gen1Battle::stored_moves(self, player, idx)
     }
-    for m in mem.iter_mut() {
-        m.last = last;
+    fn active_idx(&self, player: usize) -> u8 {
+        Gen1Battle::active_idx(self, player)
     }
 }
 
-/// Post-update bookkeeping from public state: elapsed counters advance once per new turn and
-/// reset when the condition ends; observed sleep resets once a Pokémon is no longer asleep.
+/// Post-update bookkeeping from public state (see `reveal::update_trackers`).
 fn update_trackers(b: &Gen1Battle, turn_advanced: bool, mem: &mut [Memory; 2]) {
     if !b.started() {
         return;
     }
     let binding = [b.volatiles(0) >> V::BINDING & 1 != 0, b.volatiles(1) >> V::BINDING & 1 != 0];
-    for player in 0..2 {
+    let flags: [crate::reveal::TrackFlags; 2] = std::array::from_fn(|player| {
         let v = b.volatiles(player);
-        let conf = (v >> V::CONFUSION) & 1 != 0;
-        let disabled = (v >> V::DISABLE_MOVE) & 0b111 != 0;
-        let toxic = (v >> V::TOXIC) & 1 != 0;
-        let trapped = binding[0] || binding[1];
-        let asleep: [bool; 6] = std::array::from_fn(|i| b.status_byte(player, i) & 0b111 != 0);
-        for m in mem.iter_mut() {
-            let t = &mut m.track[player];
-            let step = |c: &mut u8, on: bool| *c = if on { c.saturating_add(turn_advanced as u8) } else { 0 };
-            step(&mut t.confusion_elapsed, conf);
-            step(&mut t.disable_elapsed, disabled);
-            step(&mut t.trap_elapsed, trapped);
-            step(&mut t.toxic_elapsed, toxic);
-            for i in 0..6 {
-                if !asleep[i] {
-                    m.sleep_obs[player][i] = 0;
-                }
-            }
+        crate::reveal::TrackFlags {
+            confused: (v >> V::CONFUSION) & 1 != 0,
+            disabled: (v >> V::DISABLE_MOVE) & 0b111 != 0,
+            toxic: (v >> V::TOXIC) & 1 != 0,
+            trapped: binding[0] || binding[1],
+            asleep: std::array::from_fn(|i| b.status_byte(player, i) & 0b111 != 0),
         }
-    }
+    });
+    crate::reveal::update_trackers(&flags, turn_advanced, mem);
 }
 
 impl Backend for Pkmn1 {
