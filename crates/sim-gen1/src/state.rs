@@ -337,6 +337,7 @@ impl Rules {
 
 /// Action kinds in Showdown's queue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ActionKind {
     BeforeTurn,
     Move,
@@ -346,21 +347,38 @@ pub enum ActionKind {
     Residual,
 }
 
+/// A queued action with its resolved `order`, `priority` and `speed` (8 bytes).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Action {
     pub kind: ActionKind,
-    pub order: u64,
-    pub priority: i32,
-    pub speed: i64,
     /// Acting side (for pokemon-bound actions).
     pub side: u8,
     /// Move id (Move), or original team slot of the incoming Pokémon (Switch/InstaSwitch/RunSwitch).
     pub data: u8,
+    pub priority: i8,
+    /// Showdown's `order` (3..=300 for every Gen 1 action).
+    pub order: u16,
+    /// The action's speed (a modified Speed stat, or 1).
+    pub speed: u16,
 }
 
 impl Default for Action {
     fn default() -> Self {
-        Action { kind: ActionKind::Residual, order: 0, priority: 0, speed: 0, side: 0, data: 0 }
+        Action::new(ActionKind::Residual, 0, 0)
+    }
+}
+
+impl Action {
+    /// An unresolved action (`order`, `priority` and `speed` are filled in by `resolveAction`).
+    #[inline]
+    pub const fn new(kind: ActionKind, side: u8, data: u8) -> Action {
+        Action { kind, side, data, priority: 0, order: 0, speed: 0 }
+    }
+
+    /// `comparePriority` key ([`sim_core::sort::key`]).
+    #[inline(always)]
+    pub fn key(&self) -> u64 {
+        sim_core::sort::key(self.order, self.priority, self.speed, 0)
     }
 }
 
@@ -376,7 +394,7 @@ impl Default for Queue {
     fn default() -> Self {
         Queue {
             len: 0,
-            list: [Action { kind: ActionKind::Residual, order: 0, priority: 0, speed: 0, side: 0, data: 0 }; QUEUE_CAP],
+            list: [Action::new(ActionKind::Residual, 0, 0); QUEUE_CAP],
         }
     }
 }

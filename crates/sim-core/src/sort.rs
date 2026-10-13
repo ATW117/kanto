@@ -53,12 +53,35 @@ pub fn compare(a: &Priority, b: &Priority) -> i64 {
     a.effect_order as i64 - b.effect_order as i64
 }
 
+/// Shuffle a group of `len` tied items starting at `start` (`len - 1` PRNG calls).
+#[inline(always)]
+fn shuffle_ties<T>(rng: &mut Prng, list: &mut [T], start: usize, len: usize, label: &'static str) {
+    if len > 1 {
+        rng.shuffle(list, start, start + len, label);
+    }
+}
+
 /// `Battle#speedSort(list, comparator)`: sorts `list` in place, shuffling ties with `rng`.
+#[inline]
 pub fn speed_sort<T: Copy>(rng: &mut Prng, list: &mut [T], cmp: impl Fn(&T, &T) -> i64, label: &'static str) {
     let n = list.len();
     if n < 2 {
         return;
     }
+    if n == 2 {
+        // The selection sort below, unrolled for two items (the common case: same PRNG calls).
+        let delta = cmp(&list[0], &list[1]);
+        if delta > 0 {
+            list.swap(0, 1);
+        }
+        shuffle_ties(rng, list, 0, if delta == 0 { 2 } else { 1 }, label);
+        return;
+    }
+    speed_sort_n(rng, list, cmp, label)
+}
+
+fn speed_sort_n<T: Copy>(rng: &mut Prng, list: &mut [T], cmp: impl Fn(&T, &T) -> i64, label: &'static str) {
+    let n = list.len();
     let mut sorted = 0;
     let mut next = [0usize; 16];
     while sorted + 1 < n {
@@ -83,11 +106,27 @@ pub fn speed_sort<T: Copy>(rng: &mut Prng, list: &mut [T], cmp: impl Fn(&T, &T) 
                 list.swap(sorted + i, index);
             }
         }
-        if len > 1 {
-            rng.shuffle(list, sorted, sorted + len, label);
-        }
+        shuffle_ties(rng, list, sorted, len, label);
         sorted += len;
     }
+}
+
+/// `order` value of [`key`] for Showdown's unset order (2^32).
+pub const KEY_ORDER_UNSET: u16 = u16::MAX;
+
+/// A `comparePriority` sort key packed into a `u64`: ascending integer order is Showdown's order
+/// (`order` low first, `priority` high first, `speed` high first, `subOrder` low first) and equal
+/// keys are exactly the ties. Covers every key the simulator sorts: orders up to 300 (or
+/// [`KEY_ORDER_UNSET`]), priorities in `i8`, speeds in `u16`, sub-orders in `u8`.
+#[inline(always)]
+pub const fn key(order: u16, priority: i8, speed: u16, sub_order: u8) -> u64 {
+    (order as u64) << 48 | ((127 - priority as i16) as u64) << 40 | ((u16::MAX - speed) as u64) << 16 | sub_order as u64
+}
+
+/// [`speed_sort`] on `(key, payload)` pairs ([`key`]).
+#[inline]
+pub fn sort_by_key<T: Copy>(rng: &mut Prng, list: &mut [(u64, T)], label: &'static str) {
+    speed_sort(rng, list, |a, b| a.0.cmp(&b.0) as i64, label);
 }
 
 /// [`speed_sort`] on `(Priority, payload)` pairs with `comparePriority`.
@@ -107,6 +146,43 @@ mod tests {
         sort_by_priority(&mut rng, &mut l, "t");
         assert_eq!(l[0].1, 1);
         assert_eq!(rng, before);
+    }
+
+    /// The packed key orders exactly like `comparePriority` (sign of the comparison).
+    #[test]
+    fn key_matches_compare_priority() {
+        let orders = [3u16, 4, 101, 103, 200, 300, KEY_ORDER_UNSET];
+        let full = |o: u16| if o == KEY_ORDER_UNSET { ORDER_UNSET } else { o as u64 };
+        let mut items = Vec::new();
+        for &o in &orders {
+            for prio in [-128i8, -1, 0, 1, 2, 7, 100, 127] {
+                for speed in [0u16, 1, 2, 300, 999, 65535] {
+                    for sub in [0u8, 2, 5, 255] {
+                        items.push((key(o, prio, speed, sub), Priority::new(full(o), prio as i32, speed as i64, sub as i32)));
+                    }
+                }
+            }
+        }
+        for a in &items {
+            for b in items.iter().step_by(7) {
+                assert_eq!(a.0.cmp(&b.0) as i64, compare(&a.1, &b.1).signum(), "{:?} vs {:?}", a.1, b.1);
+            }
+        }
+    }
+
+    /// The two-item fast path makes the same swaps and PRNG calls as the general selection sort.
+    #[test]
+    fn two_item_fast_path_matches_general_sort() {
+        for seed in 0..200u64 {
+            for (x, y) in [(1i64, 2i64), (2, 1), (5, 5)] {
+                let (mut r1, mut r2) = (Prng::Gen5(seed), Prng::Gen5(seed));
+                let mut a = [(x, 0u8), (y, 1u8)];
+                let mut b = a;
+                speed_sort(&mut r1, &mut a, |p, q| q.0 - p.0, "t");
+                speed_sort_n(&mut r2, &mut b, |p, q| q.0 - p.0, "t");
+                assert_eq!((a, r1), (b, r2));
+            }
+        }
     }
 
     #[test]

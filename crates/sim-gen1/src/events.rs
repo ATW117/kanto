@@ -5,7 +5,7 @@
 
 use crate::battle::modify_stat;
 use crate::state::*;
-use sim_core::sort::{sort_by_priority, Priority, ORDER_UNSET};
+use sim_core::sort::{key, sort_by_key, KEY_ORDER_UNSET};
 use sim_core::{Event, Player, Sink};
 use sim_data::gen1::{self as data};
 
@@ -20,8 +20,13 @@ pub(crate) enum Dmg {
 }
 
 /// `Condition` handlers sort after `Status` ones at equal priority (`subOrder` 2 vs 0).
-const SUB_STATUS: i32 = 0;
-const SUB_CONDITION: i32 = 2;
+const SUB_STATUS: u8 = 0;
+const SUB_CONDITION: u8 = 2;
+
+/// Volatiles with `DisableMove` handlers.
+const DISABLE_MOVE_VOLS: u32 = 1 << v::PARTIALLYTRAPPED | 1 << v::FAKEPARTIALLYTRAPPED | 1 << v::PARTIALTRAPPINGLOCK | 1 << v::BIDE | 1 << v::DISABLE;
+/// Volatiles with a `duration` (counted down by `fieldEvent('Residual')`).
+const DURATION_VOLS: u32 = 1 << v::FLINCH | 1 << v::PARTIALLYTRAPPED | 1 << v::FAKEPARTIALLYTRAPPED | 1 << v::PARTIALTRAPPINGLOCK;
 
 impl Battle {
     // ---- Volatiles ---------------------------------------------------------------------------
@@ -213,8 +218,9 @@ impl Battle {
     fn set_status_event(&mut self, p: Player, status: u8, source: Player) -> bool {
         let r = self.rules;
         if r.sleep_clause && r.freeze_clause && r.compat == Compat::Vanilla {
-            let mut l = [(Priority::new(ORDER_UNSET, 0, 0, 5), 0u8), (Priority::new(ORDER_UNSET, 0, 0, 5), 1u8)];
-            sort_by_priority(&mut self.rng, &mut l, "SetStatus.speedSort");
+            let k = key(KEY_ORDER_UNSET, 0, 0, 5);
+            let mut l = [(k, 0u8), (k, 1u8)];
+            sort_by_key(&mut self.rng, &mut l, "SetStatus.speedSort");
         }
         if source == p {
             return true;
@@ -437,13 +443,13 @@ impl Battle {
 
     /// Sort key for a handler on `p`'s active Pokémon.
     #[inline]
-    fn hkey(&self, p: Player, priority: i32, sub: i32) -> Priority {
-        Priority::new(ORDER_UNSET, priority, self.sides[p].mon().speed as i64, sub)
+    fn hkey(&self, p: Player, priority: i8, sub: u8) -> u64 {
+        key(KEY_ORDER_UNSET, priority, self.sides[p].mon().speed, sub)
     }
 
     /// `runEvent('DisableMove', pokemon)` at end of turn.
     pub(crate) fn disable_move_event(&mut self, p: Player) {
-        let mut list = [(Priority::default(), 0u8); 8];
+        let mut list = [(0u64, 0u8); 8];
         let mut n = 0;
         let status = self.sides[p].mon().status;
         if matches!(status, st::SLP | st::FRZ) {
@@ -451,7 +457,7 @@ impl Battle {
             n += 1;
         }
         let disable_prio = if self.rules.compat == Compat::Pkmn { 7 } else { 0 };
-        for id in self.vol_order(p) {
+        for id in self.vols_in_order(p, DISABLE_MOVE_VOLS) {
             let prio = match id {
                 v::PARTIALLYTRAPPED | v::FAKEPARTIALLYTRAPPED => 1,
                 v::PARTIALTRAPPINGLOCK | v::BIDE => 0,
@@ -461,7 +467,7 @@ impl Battle {
             list[n] = (self.hkey(p, prio, SUB_CONDITION), id);
             n += 1;
         }
-        sort_by_priority(&mut self.rng, &mut list[..n], "DisableMove.speedSort");
+        sort_by_key(&mut self.rng, &mut list[..n], "DisableMove.speedSort");
         for &(_, h) in &list[..n] {
             let a = self.sides[p].active;
             let maybe_locked = &mut self.sides[p].mon_mut().maybe_locked;
@@ -491,10 +497,18 @@ impl Battle {
 
     /// The active's volatiles in insertion order.
     pub fn vol_order(&self, p: Player) -> VolIter {
+        self.vols_in_order(p, u32::MAX)
+    }
+
+    /// The active's volatiles among `mask` (`1 << v::*` bits) in insertion order: the sequence
+    /// [`Battle::vol_order`] gives, filtered to `mask`, so handler lists keep Showdown's
+    /// discovery order.
+    #[inline]
+    pub(crate) fn vols_in_order(&self, p: Player, mask: u32) -> VolIter {
         let a = &self.sides[p].active;
         let mut ids = [0u8; v::COUNT];
         let mut n = 0;
-        let mut bits = a.vols;
+        let mut bits = a.vols & mask;
         while bits != 0 {
             let id = bits.trailing_zeros() as u8;
             bits &= bits - 1;
@@ -502,19 +516,21 @@ impl Battle {
             n += 1;
         }
         // Stamps increase with insertion (wrapping is irrelevant: < 256 adds per switch-in).
-        ids[..n].sort_by_key(|&id| a.vstamp[id as usize]);
+        if n > 1 {
+            ids[..n].sort_by_key(|&id| a.vstamp[id as usize]);
+        }
         VolIter { ids, n, i: 0 }
     }
 
     /// `fieldEvent('Residual')`: duration countdown of Gen 1's duration-based volatiles.
     pub(crate) fn residual_event<S: Sink>(&mut self, s: &mut S) {
-        let mut list = [(Priority::default(), (0u8, 0u8)); 16];
+        let mut list = [(0u64, (0u8, 0u8)); 8];
         let mut n = 0;
         for p in 0..2 {
             if self.sides[p].active.species == 0 {
                 continue;
             }
-            for id in self.vol_order(p) {
+            for id in self.vols_in_order(p, DURATION_VOLS) {
                 let dur = self.vol_duration(p, id);
                 if dur == 0 {
                     continue;
@@ -524,7 +540,7 @@ impl Battle {
             }
         }
         if self.rules.compat == Compat::Vanilla {
-            sort_by_priority(&mut self.rng, &mut list[..n], "Residual.speedSort");
+            sort_by_key(&mut self.rng, &mut list[..n], "Residual.speedSort");
         }
         for &(_, (p, id)) in &list[..n] {
             let p = p as usize;
@@ -581,7 +597,7 @@ impl Battle {
     /// `runEvent('AfterMoveSelf', pokemon)`: residualdmg counter (100), sleep wake-up (3),
     /// PSN/BRN/TOX damage (2), Leech Seed (1).
     pub(crate) fn after_move_self<S: Sink>(&mut self, p: Player, s: &mut S) {
-        let mut list = [(Priority::default(), 0u8); 4];
+        let mut list = [(0u64, 0u8); 4];
         let mut n = 0;
         let status = self.sides[p].mon().status;
         match status {
@@ -595,7 +611,7 @@ impl Battle {
             }
             _ => {}
         }
-        for id in self.vol_order(p) {
+        for id in self.vols_in_order(p, 1 << v::LEECHSEED | 1 << v::RESIDUALDMG) {
             let prio = match id {
                 v::LEECHSEED => 1,
                 v::RESIDUALDMG => 100,
@@ -604,7 +620,7 @@ impl Battle {
             list[n] = (self.hkey(p, prio, SUB_CONDITION), id);
             n += 1;
         }
-        sort_by_priority(&mut self.rng, &mut list[..n], "AfterMoveSelf.speedSort");
+        sort_by_key(&mut self.rng, &mut list[..n], "AfterMoveSelf.speedSort");
         for &(_, h) in &list[..n] {
             match h {
                 101 => {
@@ -669,15 +685,13 @@ impl Battle {
     /// `runEvent('AfterMove', pokemon, target)`: Wrap lock bookkeeping, Hyper Beam recharge
     /// message, Thrash end. `target_alive` is `target.hp > 0`; the target is always the foe.
     pub(crate) fn after_move<S: Sink>(&mut self, p: Player, target: Player, _s: &mut S) {
-        let mut list = [(Priority::default(), 0u8); 4];
+        let mut list = [(0u64, 0u8); 4];
         let mut n = 0;
-        for id in self.vol_order(p) {
-            if matches!(id, v::PARTIALTRAPPINGLOCK | v::MUSTRECHARGE | v::LOCKEDMOVE) {
-                list[n] = (self.hkey(p, 0, SUB_CONDITION), id);
-                n += 1;
-            }
+        for id in self.vols_in_order(p, 1 << v::PARTIALTRAPPINGLOCK | 1 << v::MUSTRECHARGE | 1 << v::LOCKEDMOVE) {
+            list[n] = (self.hkey(p, 0, SUB_CONDITION), id);
+            n += 1;
         }
-        sort_by_priority(&mut self.rng, &mut list[..n], "AfterMove.speedSort");
+        sort_by_key(&mut self.rng, &mut list[..n], "AfterMove.speedSort");
         for &(_, id) in &list[..n] {
             if !self.sides[p].active.has(id) {
                 continue;

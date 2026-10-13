@@ -66,8 +66,8 @@ MUTANTS = [
     ("confusion-selfhit-def", G + "moves.rs", "let def = self.sides[p].active.modified[1] as u64;", "let def = self.sides[p].mon().stats[2] as u64;", ""),
     ("bide-into-sub-x1", G + "moves.rs", "uncapped = R::N(self.sides[p].active.bide_damage.wrapping_mul(2));", "uncapped = R::N(self.sides[p].active.bide_damage);", ""),
     # -- speed ties / ordering
-    ("speedtie-reverse", C + "sort.rs", "rng.shuffle(list, sorted, sorted + len, label);", "rng.shuffle(list, sorted, sorted + len, label); list[sorted..sorted + len].reverse();", ""),
-    ("speedtie-no-rng", C + "sort.rs", "if len > 1 {\n            rng.shuffle", "if len > 2 {\n            rng.shuffle", ""),
+    ("speedtie-reverse", C + "sort.rs", "rng.shuffle(list, start, start + len, label);", "rng.shuffle(list, start, start + len, label); list[start..start + len].reverse();", ""),
+    ("speedtie-no-rng", C + "sort.rs", "if len > 1 {\n        rng.shuffle", "if len > 2 {\n        rng.shuffle", ""),
     ("vol-order-reverse", G + "events.rs", "ids[..n].sort_by_key(|&id| a.vstamp[id as usize]);", "ids[..n].sort_by_key(|&id| std::cmp::Reverse(a.vstamp[id as usize]));", "volatile order"),
     # -- secondaries, status
     ("sec-skip-roll-if-statused", G + "moves.rs", "if !blocked {\n                        if sec.chance == 0", "if !blocked && !(sec.status != 0 && self.sides[t].mon().status != st::NONE) {\n                        if sec.chance == 0", ""),

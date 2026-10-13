@@ -6,7 +6,7 @@
 //! `moves.rs`, event-handler dispatch in `events.rs`.
 
 use crate::state::*;
-use sim_core::sort::{compare, speed_sort, Priority, ORDER_UNSET};
+use sim_core::sort::speed_sort;
 use sim_core::{Choice, Event, Outcome, Player, Prng, Request, Sink};
 use sim_data::gen1::{self as data, MOVES, SPECIES};
 
@@ -293,11 +293,11 @@ impl Battle {
             let Some(c) = chosen[p] else { continue };
             let side = p as u8;
             let a = match c {
-                Chosen::Switch(t) => Action { kind: ActionKind::Switch, order: 0, priority: 0, speed: 0, side, data: t },
-                Chosen::InstaSwitch(t) => Action { kind: ActionKind::InstaSwitch, order: 0, priority: 0, speed: 0, side, data: t },
+                Chosen::Switch(t) => Action::new(ActionKind::Switch, side, t),
+                Chosen::InstaSwitch(t) => Action::new(ActionKind::InstaSwitch, side, t),
                 _ => {
                     let id = self.commit_move_choice(p, c);
-                    Action { kind: ActionKind::Move, order: 0, priority: 0, speed: 0, side, data: id }
+                    Action::new(ActionKind::Move, side, id)
                 }
             };
             list.push(self.resolve_action(a));
@@ -307,13 +307,13 @@ impl Battle {
         }
         // queue.sort()
         let n = list.len as usize;
-        speed_sort(&mut self.rng, &mut list.list[..n], |a, b| compare(&prio(a), &prio(b)), "queue.sort");
+        speed_sort(&mut self.rng, &mut list.list[..n], |a, b| a.key().cmp(&b.key()) as i64, "queue.sort");
         self.queue = list;
         // turnLoop
         if !self.mid_turn {
-            let bt = self.resolve_action(Action { kind: ActionKind::BeforeTurn, order: 0, priority: 0, speed: 0, side: 0, data: 0 });
+            let bt = self.resolve_action(Action::new(ActionKind::BeforeTurn, 0, 0));
             self.insert_action(bt, None);
-            let res = self.resolve_action(Action { kind: ActionKind::Residual, order: 0, priority: 0, speed: 0, side: 0, data: 0 });
+            let res = self.resolve_action(Action::new(ActionKind::Residual, 0, 0));
             self.queue.push(res);
             self.mid_turn = true;
         }
@@ -412,16 +412,16 @@ impl Battle {
         match a.kind {
             ActionKind::Move => {
                 if a.data < 166 {
-                    a.priority = MOVES[a.data as usize].priority as i32;
+                    a.priority = MOVES[a.data as usize].priority;
                 }
-                a.speed = self.sides[p].active.modified[4] as i64;
+                a.speed = self.sides[p].active.modified[4];
             }
             ActionKind::Switch | ActionKind::InstaSwitch => {
                 // resolveAction: action.pokemon.switchFlag = false
                 self.sides[p].active.switch_flag = false;
-                a.speed = self.sides[p].active.modified[4] as i64;
+                a.speed = self.sides[p].active.modified[4];
             }
-            ActionKind::RunSwitch => a.speed = self.sides[p].active.modified[4] as i64,
+            ActionKind::RunSwitch => a.speed = self.sides[p].active.modified[4],
             ActionKind::BeforeTurn | ActionKind::Residual => a.speed = 1,
         }
         a
@@ -433,15 +433,15 @@ impl Battle {
         if let Some(p) = pokemon {
             self.update_speed_one(p);
         }
-        let pa = prio(&a);
+        let ka = a.key();
         let mut first = None;
         let mut last = None;
         for (i, cur) in self.queue.as_slice().iter().enumerate() {
-            let c = compare(&pa, &prio(cur));
-            if c <= 0 && first.is_none() {
+            let c = ka.cmp(&cur.key());
+            if c.is_le() && first.is_none() {
                 first = Some(i);
             }
-            if c < 0 {
+            if c.is_lt() {
                 last = Some(i);
                 break;
             }
@@ -468,8 +468,8 @@ impl Battle {
         let p = a.side as usize;
         match a.kind {
             ActionKind::Move => {
-                let mon = self.sides[p].mon();
-                if mon.fainted || a.speed < 0 {
+                // (Showdown also skips actions with a negative speed; Gen 1 speeds are positive.)
+                if self.sides[p].mon().fainted {
                     return;
                 }
                 self.run_move(p, a.data, s);
@@ -593,14 +593,7 @@ impl Battle {
         self.init_active(p);
         s.event(Event::Switch { player: p, slot: incoming });
         let _ = q;
-        let rs = self.resolve_action(Action {
-            kind: ActionKind::RunSwitch,
-            order: 0,
-            priority: 0,
-            speed: 0,
-            side: p as u8,
-            data: incoming,
-        });
+        let rs = self.resolve_action(Action::new(ActionKind::RunSwitch, p as u8, incoming));
         self.insert_action(rs, Some(p));
     }
 
@@ -703,7 +696,7 @@ impl Battle {
     pub(crate) fn change_action(&mut self, p: Player, moveid: u8) {
         self.cancel_action(p);
         self.update_speed_one(p);
-        let a = self.resolve_action(Action { kind: ActionKind::Move, order: 0, priority: 0, speed: 0, side: p as u8, data: moveid });
+        let a = self.resolve_action(Action::new(ActionKind::Move, p as u8, moveid));
         self.insert_action(a, None);
     }
 
@@ -1143,11 +1136,6 @@ impl Side {
     }
 }
 
-#[inline]
-fn prio(a: &Action) -> Priority {
-    Priority { order: a.order, priority: a.priority, speed: a.speed, sub_order: 0, effect_order: 0 }
-}
-
 /// `modifyStat`: `max(1, floor(stat * modifier))` in floating point, as Showdown computes it.
 #[inline]
 pub(crate) fn modify_stat(stat: u16, modifier: f64) -> u16 {
@@ -1170,6 +1158,3 @@ impl ArrayVec4 {
         self.items[..self.len].iter()
     }
 }
-
-#[allow(dead_code)]
-const _: u64 = ORDER_UNSET;

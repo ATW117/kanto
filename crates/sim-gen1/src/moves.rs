@@ -4,7 +4,7 @@
 
 use crate::events::Dmg;
 use crate::state::*;
-use sim_core::sort::{sort_by_priority, Priority, ORDER_UNSET};
+use sim_core::sort::{key, sort_by_key, KEY_ORDER_UNSET};
 use sim_core::{Cant, Event, Player, Sink};
 use sim_data::gen1::{self as data, mv, target as tgt, MOVES, SPECIES};
 
@@ -35,6 +35,15 @@ const SKIP_LASTDAMAGE: [u8; 24] = [
     mv::TOXIC,
     mv::TRANSFORM,
 ];
+
+/// Volatiles with `BeforeMove` handlers.
+const BEFORE_MOVE_VOLS: u32 = 1 << v::PARTIALLYTRAPPED
+    | 1 << v::FLINCH
+    | 1 << v::MUSTRECHARGE
+    | 1 << v::DISABLE
+    | 1 << v::CONFUSION
+    | 1 << v::PARTIALTRAPPINGLOCK
+    | 1 << v::BIDE;
 
 const TYPE_NORMAL: u8 = 0;
 const TYPE_FIGHTING: u8 = 1;
@@ -188,10 +197,10 @@ impl Battle {
 
     /// `runEvent('BeforeMove', pokemon, target, move)`; false = the move is aborted.
     fn before_move<S: Sink>(&mut self, p: Player, target: Player, id: u8, s: &mut S) -> bool {
-        let mut list = [(Priority::default(), 0u8); 12];
+        let mut list = [(0u64, 0u8); 8];
         let mut n = 0;
-        let speed = self.sides[p].mon().speed as i64;
-        let key = |prio: i32, sub: i32| Priority::new(ORDER_UNSET, prio, speed, sub);
+        let speed = self.sides[p].mon().speed;
+        let key = |prio: i8, sub: u8| key(KEY_ORDER_UNSET, prio, speed, sub);
         match self.sides[p].mon().status {
             st::FRZ => {
                 list[n] = (key(12, 0), 100);
@@ -207,7 +216,7 @@ impl Battle {
             }
             _ => {}
         }
-        for vid in self.vol_order(p) {
+        for vid in self.vols_in_order(p, BEFORE_MOVE_VOLS) {
             let prio = match vid {
                 v::PARTIALLYTRAPPED => 9,
                 v::FLINCH => 8,
@@ -220,7 +229,7 @@ impl Battle {
             list[n] = (key(prio, 2), vid);
             n += 1;
         }
-        sort_by_priority(&mut self.rng, &mut list[..n], "BeforeMove.speedSort");
+        sort_by_key(&mut self.rng, &mut list[..n], "BeforeMove.speedSort");
         let slot = self.sides[p].order[0];
         for &(_, h) in &list[..n] {
             match h {
