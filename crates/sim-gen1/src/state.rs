@@ -565,8 +565,11 @@ impl Queue {
     pub fn insert(&mut self, index: usize, a: Action) {
         assert!((self.len as usize) < QUEUE_CAP, "action queue overflow");
         let n = self.len as usize;
-        self.list.copy_within(index..n, index + 1);
-        self.list[index] = a;
+        // Shift by swapping (a short loop; no memmove call).
+        let mut carry = a;
+        for slot in &mut self.list[index..=n] {
+            std::mem::swap(&mut carry, slot);
+        }
         self.len += 1;
     }
     #[inline]
@@ -585,7 +588,9 @@ impl Queue {
     }
     pub fn remove(&mut self, index: usize) {
         let n = self.len as usize;
-        self.list.copy_within(index + 1..n, index);
+        for i in index..n - 1 {
+            self.list[i] = self.list[i + 1];
+        }
         self.len -= 1;
     }
 }

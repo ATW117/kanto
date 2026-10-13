@@ -305,7 +305,8 @@ impl Battle {
         // commitChoices
         self.update_speed();
         debug_assert_eq!(self.queue.len, 0, "Gen 1 never has leftover actions at a request");
-        let mut list = Queue::default();
+        // (The queue is rebuilt from the choices.)
+        self.queue.clear();
         for p in 0..2 {
             let Some(c) = chosen[p] else { continue };
             let side = p as u8;
@@ -317,15 +318,15 @@ impl Battle {
                     Action::new(ActionKind::Move, side, id)
                 }
             };
-            list.push(self.resolve_action(a));
+            let a = self.resolve_action(a);
+            self.queue.push(a);
         }
         for sd in self.sides.iter_mut() {
             sd.request = Request::None;
         }
         // queue.sort()
-        let n = list.len as usize;
-        speed_sort(&mut self.rng, &mut list.list[..n], |a, b| a.key().cmp(&b.key()) as i64, "queue.sort");
-        self.queue = list;
+        let n = self.queue.len as usize;
+        speed_sort(&mut self.rng, &mut self.queue.list[..n], |a, b| a.key().cmp(&b.key()) as i64, "queue.sort");
         // turnLoop
         if !self.mid_turn {
             let bt = self.resolve_action(Action::new(ActionKind::BeforeTurn, 0, 0));
