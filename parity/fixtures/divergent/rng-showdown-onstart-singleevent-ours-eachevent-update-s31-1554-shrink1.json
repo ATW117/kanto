@@ -1,0 +1,573 @@
+{
+  "spec": {
+    "id": "s31-1554-shrink1",
+    "format": "gen1ou",
+    "patch": "pkmn",
+    "seed": "32971,26858,26487,32313",
+    "p1": [
+      {
+        "species": "Mr. Mime",
+        "moves": [
+          "thunderwave",
+          "bide",
+          "flash",
+          "psychic"
+        ],
+        "level": 100,
+        "ivs": {
+          "atk": 30,
+          "def": 30,
+          "hp": 30,
+          "spa": 30,
+          "spd": 30,
+          "spe": 30
+        },
+        "evs": {
+          "atk": 255,
+          "def": 255,
+          "hp": 255,
+          "spa": 255,
+          "spd": 255,
+          "spe": 255
+        }
+      }
+    ],
+    "p2": [
+      {
+        "species": "Goldeen",
+        "moves": [
+          "doubleedge",
+          "hornattack",
+          "takedown",
+          "watergun"
+        ],
+        "level": 100,
+        "ivs": {
+          "atk": 30,
+          "def": 30,
+          "hp": 30,
+          "spa": 30,
+          "spd": 30,
+          "spe": 30
+        },
+        "evs": {
+          "atk": 255,
+          "def": 255,
+          "hp": 255,
+          "spa": 255,
+          "spd": 255,
+          "spe": 255
+        }
+      },
+      {
+        "species": "Mr. Mime",
+        "moves": [
+          "takedown",
+          "doubleteam",
+          "thunder",
+          "megapunch"
+        ],
+        "level": 100,
+        "ivs": {
+          "atk": 30,
+          "def": 30,
+          "hp": 30,
+          "spa": 30,
+          "spd": 30,
+          "spe": 30
+        },
+        "evs": {
+          "atk": 255,
+          "def": 255,
+          "hp": 255,
+          "spa": 255,
+          "spd": 255,
+          "spe": 255
+        }
+      }
+    ],
+    "choices": [
+      [
+        "move 2",
+        "switch 2"
+      ]
+    ],
+    "choiceSeed": 1456633187,
+    "simCompat": "vanilla"
+  },
+  "trace": {
+    "id": "s31-1554-shrink1",
+    "seed": "32971,26858,26487,32313",
+    "steps": [
+      {
+        "choices": [
+          "",
+          ""
+        ],
+        "legal": [
+          [],
+          []
+        ],
+        "requests": [
+          "",
+          ""
+        ],
+        "log": [
+          "|gametype|singles",
+          "|player|p1|p1||",
+          "|player|p2|p2||",
+          "|gen|1",
+          "|tier|[Gen 1] OU",
+          "|rule|Desync Clause Mod: Desyncs resolve to link battle behavior from the acting player's perspective.",
+          "|rule|HP Percentage Mod: HP is shown in percentages",
+          "|rule|Endless Battle Clause: Forcing endless battles is banned",
+          "|rule|Sleep Clause Mod: Limit one foe put to sleep",
+          "|rule|Freeze Clause Mod: Limit one foe frozen",
+          "|rule|Species Clause: Limit one of each Pokémon",
+          "|rule|OHKO Clause: OHKO moves are banned",
+          "|rule|Evasion Moves Clause: Evasion moves are banned",
+          "|teamsize|p1|1",
+          "|teamsize|p2|2",
+          "|start",
+          "|split|p1",
+          "|switch|p1a: Mr. Mime|Mr. Mime|283/283",
+          "|switch|p1a: Mr. Mime|Mr. Mime|100/100",
+          "|split|p2",
+          "|switch|p2a: Goldeen|Goldeen|293/293",
+          "|switch|p2a: Goldeen|Goldeen|100/100",
+          "|turn|1"
+        ],
+        "rng": [],
+        "state": {
+          "ended": false,
+          "lastDamage": 0,
+          "seed": "32971,26858,26487,32313",
+          "sides": [
+            {
+              "active": {
+                "boosts": {
+                  "accuracy": 0,
+                  "atk": 0,
+                  "def": 0,
+                  "evasion": 0,
+                  "spa": 0,
+                  "spd": 0,
+                  "spe": 0
+                },
+                "lastMove": null,
+                "moves": [
+                  [
+                    "thunderwave",
+                    32,
+                    false
+                  ],
+                  [
+                    "bide",
+                    16,
+                    false
+                  ],
+                  [
+                    "flash",
+                    32,
+                    false
+                  ],
+                  [
+                    "psychic",
+                    16,
+                    false
+                  ]
+                ],
+                "slot": 0,
+                "species": "mrmime",
+                "stats": {
+                  "atk": 188,
+                  "def": 228,
+                  "spa": 298,
+                  "spd": 298,
+                  "spe": 278
+                },
+                "stored": {
+                  "atk": 188,
+                  "def": 228,
+                  "spa": 298,
+                  "spd": 298,
+                  "spe": 278
+                },
+                "transformed": false,
+                "types": [
+                  "Psychic"
+                ],
+                "volatiles": {}
+              },
+              "lastEnemyMove": null,
+              "lastEnemySelectedMove": "nomove",
+              "lastMove": null,
+              "lastSelectedMove": "nomove",
+              "lastSelectedMoveSlot": 0,
+              "left": 1,
+              "order": [
+                0
+              ],
+              "team": [
+                {
+                  "fainted": false,
+                  "hp": 283,
+                  "pp": [
+                    32,
+                    16,
+                    32,
+                    16
+                  ],
+                  "speed": 278,
+                  "status": ""
+                }
+              ]
+            },
+            {
+              "active": {
+                "boosts": {
+                  "accuracy": 0,
+                  "atk": 0,
+                  "def": 0,
+                  "evasion": 0,
+                  "spa": 0,
+                  "spd": 0,
+                  "spe": 0
+                },
+                "lastMove": null,
+                "moves": [
+                  [
+                    "doubleedge",
+                    24,
+                    false
+                  ],
+                  [
+                    "hornattack",
+                    40,
+                    false
+                  ],
+                  [
+                    "takedown",
+                    32,
+                    false
+                  ],
+                  [
+                    "watergun",
+                    40,
+                    false
+                  ]
+                ],
+                "slot": 0,
+                "species": "goldeen",
+                "stats": {
+                  "atk": 232,
+                  "def": 218,
+                  "spa": 198,
+                  "spd": 198,
+                  "spe": 224
+                },
+                "stored": {
+                  "atk": 232,
+                  "def": 218,
+                  "spa": 198,
+                  "spd": 198,
+                  "spe": 224
+                },
+                "transformed": false,
+                "types": [
+                  "Water"
+                ],
+                "volatiles": {}
+              },
+              "lastEnemyMove": null,
+              "lastEnemySelectedMove": "nomove",
+              "lastMove": null,
+              "lastSelectedMove": "nomove",
+              "lastSelectedMoveSlot": 0,
+              "left": 2,
+              "order": [
+                0,
+                1
+              ],
+              "team": [
+                {
+                  "fainted": false,
+                  "hp": 293,
+                  "pp": [
+                    24,
+                    40,
+                    32,
+                    40
+                  ],
+                  "speed": 224,
+                  "status": ""
+                },
+                {
+                  "fainted": false,
+                  "hp": 283,
+                  "pp": [
+                    32,
+                    24,
+                    16,
+                    32
+                  ],
+                  "speed": 278,
+                  "status": ""
+                }
+              ]
+            }
+          ],
+          "turn": 1,
+          "winner": ""
+        }
+      },
+      {
+        "choices": [
+          "move 2",
+          "switch 2"
+        ],
+        "legal": [
+          [
+            "move 1",
+            "move 2",
+            "move 3",
+            "move 4"
+          ],
+          [
+            "move 1",
+            "move 2",
+            "move 3",
+            "move 4",
+            "switch 2"
+          ]
+        ],
+        "requests": [
+          "move",
+          "move"
+        ],
+        "log": [
+          "|split|p2",
+          "|switch|p2a: Mr. Mime|Mr. Mime|283/283",
+          "|switch|p2a: Mr. Mime|Mr. Mime|100/100",
+          "|move|p1a: Mr. Mime|Bide|p1a: Mr. Mime",
+          "|-start|p1a: Mr. Mime|Bide",
+          "|upkeep",
+          "|turn|2"
+        ],
+        "rng": [
+          [
+            "Battle.onStart@moves.js:57 < Battle.singleEvent@battle.js:444 < Pokemon.addVolatile@pokemon.js:1515",
+            2,
+            4,
+            2
+          ]
+        ],
+        "state": {
+          "ended": false,
+          "lastDamage": 0,
+          "seed": "14778,53979,17510,60480",
+          "sides": [
+            {
+              "active": {
+                "boosts": {
+                  "accuracy": 0,
+                  "atk": 0,
+                  "def": 0,
+                  "evasion": 0,
+                  "spa": 0,
+                  "spd": 0,
+                  "spe": 0
+                },
+                "lastMove": "bide",
+                "moves": [
+                  [
+                    "thunderwave",
+                    32,
+                    false
+                  ],
+                  [
+                    "bide",
+                    15,
+                    false
+                  ],
+                  [
+                    "flash",
+                    32,
+                    false
+                  ],
+                  [
+                    "psychic",
+                    16,
+                    false
+                  ]
+                ],
+                "slot": 0,
+                "species": "mrmime",
+                "stats": {
+                  "atk": 188,
+                  "def": 228,
+                  "spa": 298,
+                  "spd": 298,
+                  "spe": 278
+                },
+                "stored": {
+                  "atk": 188,
+                  "def": 228,
+                  "spa": 298,
+                  "spd": 298,
+                  "spe": 278
+                },
+                "transformed": false,
+                "types": [
+                  "Psychic"
+                ],
+                "volatiles": {
+                  "bide": {
+                    "damage": 0,
+                    "time": 2
+                  }
+                }
+              },
+              "lastEnemyMove": "bide",
+              "lastEnemySelectedMove": "bide",
+              "lastMove": "bide",
+              "lastSelectedMove": "bide",
+              "lastSelectedMoveSlot": 1,
+              "left": 1,
+              "order": [
+                0
+              ],
+              "team": [
+                {
+                  "fainted": false,
+                  "hp": 283,
+                  "pp": [
+                    32,
+                    15,
+                    32,
+                    16
+                  ],
+                  "speed": 278,
+                  "status": ""
+                }
+              ]
+            },
+            {
+              "active": {
+                "boosts": {
+                  "accuracy": 0,
+                  "atk": 0,
+                  "def": 0,
+                  "evasion": 0,
+                  "spa": 0,
+                  "spd": 0,
+                  "spe": 0
+                },
+                "lastMove": null,
+                "moves": [
+                  [
+                    "takedown",
+                    32,
+                    false
+                  ],
+                  [
+                    "doubleteam",
+                    24,
+                    false
+                  ],
+                  [
+                    "thunder",
+                    16,
+                    false
+                  ],
+                  [
+                    "megapunch",
+                    32,
+                    false
+                  ]
+                ],
+                "slot": 1,
+                "species": "mrmime",
+                "stats": {
+                  "atk": 188,
+                  "def": 228,
+                  "spa": 298,
+                  "spd": 298,
+                  "spe": 278
+                },
+                "stored": {
+                  "atk": 188,
+                  "def": 228,
+                  "spa": 298,
+                  "spd": 298,
+                  "spe": 278
+                },
+                "transformed": false,
+                "types": [
+                  "Psychic"
+                ],
+                "volatiles": {}
+              },
+              "lastEnemyMove": null,
+              "lastEnemySelectedMove": "nomove",
+              "lastMove": null,
+              "lastSelectedMove": "nomove",
+              "lastSelectedMoveSlot": 0,
+              "left": 2,
+              "order": [
+                1,
+                0
+              ],
+              "team": [
+                {
+                  "fainted": false,
+                  "hp": 293,
+                  "pp": [
+                    24,
+                    40,
+                    32,
+                    40
+                  ],
+                  "speed": 224,
+                  "status": ""
+                },
+                {
+                  "fainted": false,
+                  "hp": 283,
+                  "pp": [
+                    32,
+                    24,
+                    16,
+                    32
+                  ],
+                  "speed": 278,
+                  "status": ""
+                }
+              ]
+            }
+          ],
+          "turn": 2,
+          "winner": ""
+        }
+      }
+    ],
+    "end": {
+      "ended": true,
+      "turn": 17,
+      "winner": "p2"
+    },
+    "error": null
+  },
+  "divergence": {
+    "id": "s31-1554-shrink1",
+    "step": 1,
+    "turn": 2,
+    "kind": "Rng",
+    "category": "rng: showdown[onStart<singleEvent] ours[eachEvent:Update]",
+    "moves": [
+      "Bide"
+    ],
+    "details": "choices [\"move 2\", \"switch 2\"]\nfirst PRNG mismatch at call #0\n  #0* sd: Battle.onStart@moves.js:57 < Battle.singleEvent@battle.js:444 < Pokemon.addVolatile@pokemon.js:1515(2,4)=2\n       ours: eachEvent:Update(0,2)=0\n  #1  sd: -\n       ours: eachEvent:Update(0,2)=0\n  #2  sd: -\n       ours: bide.onStart(2,4)=2\n  #3  sd: -\n       ours: eachEvent:Update(0,2)=0\n  #4  sd: -\n       ours: eachEvent:Update(0,2)=1\nlog:\n|split|p2\n|switch|p2a: Mr. Mime|Mr. Mime|283/283\n|switch|p2a: Mr. Mime|Mr. Mime|100/100\n|move|p1a: Mr. Mime|Bide|p1a: Mr. Mime\n|-start|p1a: Mr. Mime|Bide\n|upkeep\n|turn|2\n"
+  },
+  "note": "category: rng: showdown[onStart<singleEvent] ours[eachEvent:Update]; shrunk from s31-1554 (step 8) to 1+2 Pokémon, step 1"
+}

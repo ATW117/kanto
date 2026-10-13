@@ -1,0 +1,517 @@
+{
+  "spec": {
+    "id": "s31-42-shrink75",
+    "format": "gen1ou",
+    "patch": "pkmn",
+    "seed": "53334,14668,38378,3425",
+    "p1": [
+      {
+        "species": "Dragonite",
+        "moves": [
+          "bide",
+          "screech",
+          "constrict"
+        ],
+        "level": 6,
+        "ivs": {
+          "atk": 22,
+          "def": 2,
+          "hp": 30,
+          "spa": 14,
+          "spd": 14,
+          "spe": 26
+        },
+        "evs": {
+          "atk": 255,
+          "def": 255,
+          "hp": 125,
+          "spa": 255,
+          "spd": 255,
+          "spe": 255
+        }
+      }
+    ],
+    "p2": [
+      {
+        "species": "Snorlax",
+        "moves": [
+          "disable",
+          "leechseed",
+          "sonicboom"
+        ],
+        "level": 68,
+        "ivs": {
+          "atk": 30,
+          "def": 30,
+          "hp": 30,
+          "spa": 30,
+          "spd": 30,
+          "spe": 30
+        },
+        "evs": {
+          "atk": 255,
+          "def": 255,
+          "hp": 255,
+          "spa": 255,
+          "spd": 255,
+          "spe": 255
+        }
+      }
+    ],
+    "choices": [
+      [
+        "move 1",
+        "move 1"
+      ]
+    ],
+    "choiceSeed": 1730734056,
+    "simCompat": "vanilla"
+  },
+  "trace": {
+    "id": "s31-42-shrink75",
+    "seed": "53334,14668,38378,3425",
+    "steps": [
+      {
+        "choices": [
+          "",
+          ""
+        ],
+        "legal": [
+          [],
+          []
+        ],
+        "requests": [
+          "",
+          ""
+        ],
+        "log": [
+          "|gametype|singles",
+          "|player|p1|p1||",
+          "|player|p2|p2||",
+          "|gen|1",
+          "|tier|[Gen 1] OU",
+          "|rule|Desync Clause Mod: Desyncs resolve to link battle behavior from the acting player's perspective.",
+          "|rule|HP Percentage Mod: HP is shown in percentages",
+          "|rule|Endless Battle Clause: Forcing endless battles is banned",
+          "|rule|Sleep Clause Mod: Limit one foe put to sleep",
+          "|rule|Freeze Clause Mod: Limit one foe frozen",
+          "|rule|Species Clause: Limit one of each Pokémon",
+          "|rule|OHKO Clause: OHKO moves are banned",
+          "|rule|Evasion Moves Clause: Evasion moves are banned",
+          "|teamsize|p1|1",
+          "|teamsize|p2|1",
+          "|start",
+          "|split|p1",
+          "|switch|p1a: Dragonite|Dragonite, L6|30/30",
+          "|switch|p1a: Dragonite|Dragonite, L6|100/100",
+          "|split|p2",
+          "|switch|p2a: Snorlax|Snorlax, L68|358/358",
+          "|switch|p2a: Snorlax|Snorlax, L68|100/100",
+          "|turn|1"
+        ],
+        "rng": [],
+        "state": {
+          "ended": false,
+          "lastDamage": 0,
+          "seed": "53334,14668,38378,3425",
+          "sides": [
+            {
+              "active": {
+                "boosts": {
+                  "accuracy": 0,
+                  "atk": 0,
+                  "def": 0,
+                  "evasion": 0,
+                  "spa": 0,
+                  "spd": 0,
+                  "spe": 0
+                },
+                "lastMove": null,
+                "moves": [
+                  [
+                    "bide",
+                    16,
+                    false
+                  ],
+                  [
+                    "screech",
+                    61,
+                    false
+                  ],
+                  [
+                    "constrict",
+                    56,
+                    false
+                  ]
+                ],
+                "slot": 0,
+                "species": "dragonite",
+                "stats": {
+                  "atk": 26,
+                  "def": 20,
+                  "spa": 21,
+                  "spd": 21,
+                  "spe": 19
+                },
+                "stored": {
+                  "atk": 26,
+                  "def": 20,
+                  "spa": 21,
+                  "spd": 21,
+                  "spe": 19
+                },
+                "transformed": false,
+                "types": [
+                  "Dragon",
+                  "Flying"
+                ],
+                "volatiles": {}
+              },
+              "lastEnemyMove": null,
+              "lastEnemySelectedMove": "nomove",
+              "lastMove": null,
+              "lastSelectedMove": "nomove",
+              "lastSelectedMoveSlot": 0,
+              "left": 1,
+              "order": [
+                0
+              ],
+              "team": [
+                {
+                  "fainted": false,
+                  "hp": 30,
+                  "pp": [
+                    16,
+                    61,
+                    56
+                  ],
+                  "speed": 19,
+                  "status": ""
+                }
+              ]
+            },
+            {
+              "active": {
+                "boosts": {
+                  "accuracy": 0,
+                  "atk": 0,
+                  "def": 0,
+                  "evasion": 0,
+                  "spa": 0,
+                  "spd": 0,
+                  "spe": 0
+                },
+                "lastMove": null,
+                "moves": [
+                  [
+                    "disable",
+                    32,
+                    false
+                  ],
+                  [
+                    "leechseed",
+                    16,
+                    false
+                  ],
+                  [
+                    "sonicboom",
+                    32,
+                    false
+                  ]
+                ],
+                "slot": 0,
+                "species": "snorlax",
+                "stats": {
+                  "atk": 217,
+                  "def": 156,
+                  "spa": 156,
+                  "spd": 156,
+                  "spe": 109
+                },
+                "stored": {
+                  "atk": 217,
+                  "def": 156,
+                  "spa": 156,
+                  "spd": 156,
+                  "spe": 109
+                },
+                "transformed": false,
+                "types": [
+                  "Normal"
+                ],
+                "volatiles": {}
+              },
+              "lastEnemyMove": null,
+              "lastEnemySelectedMove": "nomove",
+              "lastMove": null,
+              "lastSelectedMove": "nomove",
+              "lastSelectedMoveSlot": 0,
+              "left": 1,
+              "order": [
+                0
+              ],
+              "team": [
+                {
+                  "fainted": false,
+                  "hp": 358,
+                  "pp": [
+                    32,
+                    16,
+                    32
+                  ],
+                  "speed": 109,
+                  "status": ""
+                }
+              ]
+            }
+          ],
+          "turn": 1,
+          "winner": ""
+        }
+      },
+      {
+        "choices": [
+          "move 1",
+          "move 1"
+        ],
+        "legal": [
+          [
+            "move 1",
+            "move 2",
+            "move 3"
+          ],
+          [
+            "move 1",
+            "move 2",
+            "move 3"
+          ]
+        ],
+        "requests": [
+          "move",
+          "move"
+        ],
+        "log": [
+          "|move|p2a: Snorlax|Disable|p1a: Dragonite",
+          "|-start|p1a: Dragonite|Disable|Screech",
+          "|move|p1a: Dragonite|Bide|p1a: Dragonite",
+          "|-start|p1a: Dragonite|Bide",
+          "|upkeep",
+          "|turn|2"
+        ],
+        "rng": [
+          [
+            "BattleActions.tryMoveHit@scripts.js:414 < BattleActions.useMoveInner@scripts.js:337 < BattleActions.useMove@scripts.js:280",
+            0,
+            256,
+            71
+          ],
+          [
+            "Battle.onStart@moves.js:244 < Battle.singleEvent@battle.js:444 < Pokemon.addVolatile@pokemon.js:1515",
+            0,
+            3,
+            1
+          ],
+          [
+            "Battle.onStart@moves.js:249 < Battle.singleEvent@battle.js:444 < Pokemon.addVolatile@pokemon.js:1515",
+            1,
+            9,
+            4
+          ],
+          [
+            "Battle.onStart@moves.js:57 < Battle.singleEvent@battle.js:444 < Pokemon.addVolatile@pokemon.js:1515",
+            2,
+            4,
+            2
+          ]
+        ],
+        "state": {
+          "ended": false,
+          "lastDamage": 0,
+          "seed": "19257,28705,42489,33509",
+          "sides": [
+            {
+              "active": {
+                "boosts": {
+                  "accuracy": 0,
+                  "atk": 0,
+                  "def": 0,
+                  "evasion": 0,
+                  "spa": 0,
+                  "spd": 0,
+                  "spe": 0
+                },
+                "lastMove": "bide",
+                "moves": [
+                  [
+                    "bide",
+                    15,
+                    false
+                  ],
+                  [
+                    "screech",
+                    61,
+                    true
+                  ],
+                  [
+                    "constrict",
+                    56,
+                    false
+                  ]
+                ],
+                "slot": 0,
+                "species": "dragonite",
+                "stats": {
+                  "atk": 26,
+                  "def": 20,
+                  "spa": 21,
+                  "spd": 21,
+                  "spe": 19
+                },
+                "stored": {
+                  "atk": 26,
+                  "def": 20,
+                  "spa": 21,
+                  "spd": 21,
+                  "spe": 19
+                },
+                "transformed": false,
+                "types": [
+                  "Dragon",
+                  "Flying"
+                ],
+                "volatiles": {
+                  "bide": {
+                    "damage": 0,
+                    "time": 2
+                  },
+                  "disable": {
+                    "move": "screech",
+                    "slotIndex": 1,
+                    "time": 3
+                  }
+                }
+              },
+              "lastEnemyMove": "bide",
+              "lastEnemySelectedMove": "bide",
+              "lastMove": "bide",
+              "lastSelectedMove": "bide",
+              "lastSelectedMoveSlot": 0,
+              "left": 1,
+              "order": [
+                0
+              ],
+              "team": [
+                {
+                  "fainted": false,
+                  "hp": 30,
+                  "pp": [
+                    15,
+                    61,
+                    56
+                  ],
+                  "speed": 19,
+                  "status": ""
+                }
+              ]
+            },
+            {
+              "active": {
+                "boosts": {
+                  "accuracy": 0,
+                  "atk": 0,
+                  "def": 0,
+                  "evasion": 0,
+                  "spa": 0,
+                  "spd": 0,
+                  "spe": 0
+                },
+                "lastMove": "disable",
+                "moves": [
+                  [
+                    "disable",
+                    31,
+                    false
+                  ],
+                  [
+                    "leechseed",
+                    16,
+                    false
+                  ],
+                  [
+                    "sonicboom",
+                    32,
+                    false
+                  ]
+                ],
+                "slot": 0,
+                "species": "snorlax",
+                "stats": {
+                  "atk": 217,
+                  "def": 156,
+                  "spa": 156,
+                  "spd": 156,
+                  "spe": 109
+                },
+                "stored": {
+                  "atk": 217,
+                  "def": 156,
+                  "spa": 156,
+                  "spd": 156,
+                  "spe": 109
+                },
+                "transformed": false,
+                "types": [
+                  "Normal"
+                ],
+                "volatiles": {}
+              },
+              "lastEnemyMove": "disable",
+              "lastEnemySelectedMove": "disable",
+              "lastMove": "disable",
+              "lastSelectedMove": "disable",
+              "lastSelectedMoveSlot": 0,
+              "left": 1,
+              "order": [
+                0
+              ],
+              "team": [
+                {
+                  "fainted": false,
+                  "hp": 358,
+                  "pp": [
+                    31,
+                    16,
+                    32
+                  ],
+                  "speed": 109,
+                  "status": ""
+                }
+              ]
+            }
+          ],
+          "turn": 2,
+          "winner": ""
+        }
+      }
+    ],
+    "end": {
+      "ended": true,
+      "turn": 3,
+      "winner": "p2"
+    },
+    "error": null
+  },
+  "divergence": {
+    "id": "s31-42-shrink75",
+    "step": 1,
+    "turn": 2,
+    "kind": "Rng",
+    "category": "rng: showdown[-] ours[DisableMove.speedSort]",
+    "moves": [
+      "Disable",
+      "Bide"
+    ],
+    "details": "choices [\"move 1\", \"move 1\"]\nfirst PRNG mismatch at call #4\n  #1  sd: Battle.onStart@moves.js:244 < Battle.singleEvent@battle.js:444 < Pokemon.addVolatile@pokemon.js:1515(0,3)=1\n       ours: disable.onStart(0,3)=1\n  #2  sd: Battle.onStart@moves.js:249 < Battle.singleEvent@battle.js:444 < Pokemon.addVolatile@pokemon.js:1515(1,9)=4\n       ours: disable.onStart(1,9)=4\n  #3  sd: Battle.onStart@moves.js:57 < Battle.singleEvent@battle.js:444 < Pokemon.addVolatile@pokemon.js:1515(2,4)=2\n       ours: bide.onStart(2,4)=2\n  #4* sd: -\n       ours: DisableMove.speedSort(0,2)=1\nlog:\n|move|p2a: Snorlax|Disable|p1a: Dragonite\n|-start|p1a: Dragonite|Disable|Screech\n|move|p1a: Dragonite|Bide|p1a: Dragonite\n|-start|p1a: Dragonite|Bide\n|upkeep\n|turn|2\n"
+  },
+  "note": "category: rng: showdown[-] ours[DisableMove.speedSort]; shrunk from s31-42 (step 69) to 1+1 Pokémon, step 1"
+}

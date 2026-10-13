@@ -62,6 +62,10 @@ pub struct Spec {
     pub choice_seed: u32,
     #[serde(default, rename = "maxSteps", skip_serializing_if = "Option::is_none")]
     pub max_steps: Option<u32>,
+    /// Override the native sim's compatibility mode ("vanilla"/"pkmn") independently of the
+    /// Showdown `patch` (to measure where the two references differ). Ignored by the runner.
+    #[serde(default, rename = "simCompat", skip_serializing_if = "Option::is_none")]
+    pub sim_compat: Option<String>,
 }
 
 fn vanilla() -> String {
@@ -74,7 +78,8 @@ impl Spec {
             "gen1nc" => Rules::NO_CLAUSES,
             _ => Rules::OU,
         };
-        if self.patch == "pkmn" {
+        let compat = self.sim_compat.as_deref().unwrap_or(&self.patch);
+        if compat == "pkmn" {
             r.compat = sim_gen1::Compat::Pkmn;
         }
         r
@@ -219,5 +224,6 @@ pub fn random_spec(id: String, rng: &mut Rng, kind: TeamKind, format: &str, patc
         choices: None,
         choice_seed: rng.next_u64() as u32,
         max_steps: None,
+        sim_compat: None,
     }
 }

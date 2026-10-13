@@ -1,0 +1,524 @@
+{
+  "spec": {
+    "id": "s31-588-shrink8",
+    "format": "gen1ou",
+    "patch": "pkmn",
+    "seed": "7605,64012,19228,46051",
+    "p1": [
+      {
+        "species": "Slowpoke",
+        "moves": [
+          "cut",
+          "razorleaf",
+          "swift"
+        ],
+        "level": 100,
+        "ivs": {
+          "atk": 28,
+          "def": 16,
+          "hp": 6,
+          "spa": 22,
+          "spd": 22,
+          "spe": 26
+        },
+        "evs": {
+          "atk": 255,
+          "def": 255,
+          "hp": 255,
+          "spa": 193,
+          "spd": 193,
+          "spe": 255
+        }
+      }
+    ],
+    "p2": [
+      {
+        "species": "Raichu",
+        "moves": [
+          "takedown",
+          "megapunch",
+          "toxic",
+          "payday"
+        ],
+        "level": 100,
+        "ivs": {
+          "atk": 30,
+          "def": 30,
+          "hp": 30,
+          "spa": 30,
+          "spd": 30,
+          "spe": 30
+        },
+        "evs": {
+          "atk": 255,
+          "def": 255,
+          "hp": 255,
+          "spa": 255,
+          "spd": 255,
+          "spe": 255
+        }
+      }
+    ],
+    "choices": [
+      [
+        "move 3",
+        "move 3"
+      ]
+    ],
+    "choiceSeed": 2177462787,
+    "simCompat": "vanilla"
+  },
+  "trace": {
+    "id": "s31-588-shrink8",
+    "seed": "7605,64012,19228,46051",
+    "steps": [
+      {
+        "choices": [
+          "",
+          ""
+        ],
+        "legal": [
+          [],
+          []
+        ],
+        "requests": [
+          "",
+          ""
+        ],
+        "log": [
+          "|gametype|singles",
+          "|player|p1|p1||",
+          "|player|p2|p2||",
+          "|gen|1",
+          "|tier|[Gen 1] OU",
+          "|rule|Desync Clause Mod: Desyncs resolve to link battle behavior from the acting player's perspective.",
+          "|rule|HP Percentage Mod: HP is shown in percentages",
+          "|rule|Endless Battle Clause: Forcing endless battles is banned",
+          "|rule|Sleep Clause Mod: Limit one foe put to sleep",
+          "|rule|Freeze Clause Mod: Limit one foe frozen",
+          "|rule|Species Clause: Limit one of each Pokémon",
+          "|rule|OHKO Clause: OHKO moves are banned",
+          "|rule|Evasion Moves Clause: Evasion moves are banned",
+          "|teamsize|p1|1",
+          "|teamsize|p2|1",
+          "|start",
+          "|split|p1",
+          "|switch|p1a: Slowpoke|Slowpoke|359/359",
+          "|switch|p1a: Slowpoke|Slowpoke|100/100",
+          "|split|p2",
+          "|switch|p2a: Raichu|Raichu|323/323",
+          "|switch|p2a: Raichu|Raichu|100/100",
+          "|turn|1"
+        ],
+        "rng": [],
+        "state": {
+          "ended": false,
+          "lastDamage": 0,
+          "seed": "7605,64012,19228,46051",
+          "sides": [
+            {
+              "active": {
+                "boosts": {
+                  "accuracy": 0,
+                  "atk": 0,
+                  "def": 0,
+                  "evasion": 0,
+                  "spa": 0,
+                  "spd": 0,
+                  "spe": 0
+                },
+                "lastMove": null,
+                "moves": [
+                  [
+                    "cut",
+                    48,
+                    false
+                  ],
+                  [
+                    "razorleaf",
+                    40,
+                    false
+                  ],
+                  [
+                    "swift",
+                    32,
+                    false
+                  ]
+                ],
+                "slot": 0,
+                "species": "slowpoke",
+                "stats": {
+                  "atk": 226,
+                  "def": 214,
+                  "spa": 155,
+                  "spd": 155,
+                  "spe": 124
+                },
+                "stored": {
+                  "atk": 226,
+                  "def": 214,
+                  "spa": 155,
+                  "spd": 155,
+                  "spe": 124
+                },
+                "transformed": false,
+                "types": [
+                  "Water",
+                  "Psychic"
+                ],
+                "volatiles": {}
+              },
+              "lastEnemyMove": null,
+              "lastEnemySelectedMove": "nomove",
+              "lastMove": null,
+              "lastSelectedMove": "nomove",
+              "lastSelectedMoveSlot": 0,
+              "left": 1,
+              "order": [
+                0
+              ],
+              "team": [
+                {
+                  "fainted": false,
+                  "hp": 359,
+                  "pp": [
+                    48,
+                    40,
+                    32
+                  ],
+                  "speed": 124,
+                  "status": ""
+                }
+              ]
+            },
+            {
+              "active": {
+                "boosts": {
+                  "accuracy": 0,
+                  "atk": 0,
+                  "def": 0,
+                  "evasion": 0,
+                  "spa": 0,
+                  "spd": 0,
+                  "spe": 0
+                },
+                "lastMove": null,
+                "moves": [
+                  [
+                    "takedown",
+                    32,
+                    false
+                  ],
+                  [
+                    "megapunch",
+                    32,
+                    false
+                  ],
+                  [
+                    "toxic",
+                    16,
+                    false
+                  ],
+                  [
+                    "payday",
+                    32,
+                    false
+                  ]
+                ],
+                "slot": 0,
+                "species": "raichu",
+                "stats": {
+                  "atk": 278,
+                  "def": 208,
+                  "spa": 278,
+                  "spd": 278,
+                  "spe": 298
+                },
+                "stored": {
+                  "atk": 278,
+                  "def": 208,
+                  "spa": 278,
+                  "spd": 278,
+                  "spe": 298
+                },
+                "transformed": false,
+                "types": [
+                  "Electric"
+                ],
+                "volatiles": {}
+              },
+              "lastEnemyMove": null,
+              "lastEnemySelectedMove": "nomove",
+              "lastMove": null,
+              "lastSelectedMove": "nomove",
+              "lastSelectedMoveSlot": 0,
+              "left": 1,
+              "order": [
+                0
+              ],
+              "team": [
+                {
+                  "fainted": false,
+                  "hp": 323,
+                  "pp": [
+                    32,
+                    32,
+                    16,
+                    32
+                  ],
+                  "speed": 298,
+                  "status": ""
+                }
+              ]
+            }
+          ],
+          "turn": 1,
+          "winner": ""
+        }
+      },
+      {
+        "choices": [
+          "move 3",
+          "move 3"
+        ],
+        "legal": [
+          [
+            "move 1",
+            "move 2",
+            "move 3"
+          ],
+          [
+            "move 1",
+            "move 2",
+            "move 3",
+            "move 4"
+          ]
+        ],
+        "requests": [
+          "move",
+          "move"
+        ],
+        "log": [
+          "|move|p2a: Raichu|Toxic|p1a: Slowpoke",
+          "|-status|p1a: Slowpoke|tox",
+          "|move|p1a: Slowpoke|Swift|p2a: Raichu",
+          "|split|p2",
+          "|-damage|p2a: Raichu|274/323",
+          "|-damage|p2a: Raichu|85/100",
+          "|split|p1",
+          "|-damage|p1a: Slowpoke|337/359 tox|[from] psn",
+          "|-damage|p1a: Slowpoke|94/100 tox|[from] psn",
+          "|upkeep",
+          "|turn|2"
+        ],
+        "rng": [
+          [
+            "BattleActions.tryMoveHit@scripts.js:414 < BattleActions.useMoveInner@scripts.js:337 < BattleActions.useMove@scripts.js:280",
+            0,
+            256,
+            166
+          ],
+          [
+            "BattleActions.getDamage@scripts.js:694 < BattleActions.moveHit@scripts.js:515 < BattleActions.tryMoveHit@scripts.js:450",
+            0,
+            256,
+            202
+          ],
+          [
+            "BattleActions.getDamage@scripts.js:779 < BattleActions.moveHit@scripts.js:515 < BattleActions.tryMoveHit@scripts.js:450",
+            217,
+            256,
+            226
+          ]
+        ],
+        "state": {
+          "ended": false,
+          "lastDamage": 49,
+          "seed": "15378,48930,58837,63028",
+          "sides": [
+            {
+              "active": {
+                "boosts": {
+                  "accuracy": 0,
+                  "atk": 0,
+                  "def": 0,
+                  "evasion": 0,
+                  "spa": 0,
+                  "spd": 0,
+                  "spe": 0
+                },
+                "lastMove": "swift",
+                "moves": [
+                  [
+                    "cut",
+                    48,
+                    false
+                  ],
+                  [
+                    "razorleaf",
+                    40,
+                    false
+                  ],
+                  [
+                    "swift",
+                    31,
+                    false
+                  ]
+                ],
+                "slot": 0,
+                "species": "slowpoke",
+                "stats": {
+                  "atk": 226,
+                  "def": 214,
+                  "spa": 155,
+                  "spd": 155,
+                  "spe": 124
+                },
+                "stored": {
+                  "atk": 226,
+                  "def": 214,
+                  "spa": 155,
+                  "spd": 155,
+                  "spe": 124
+                },
+                "transformed": false,
+                "types": [
+                  "Water",
+                  "Psychic"
+                ],
+                "volatiles": {
+                  "residualdmg": {
+                    "counter": 1
+                  }
+                }
+              },
+              "lastEnemyMove": "swift",
+              "lastEnemySelectedMove": "swift",
+              "lastMove": "swift",
+              "lastSelectedMove": "swift",
+              "lastSelectedMoveSlot": 2,
+              "left": 1,
+              "order": [
+                0
+              ],
+              "team": [
+                {
+                  "fainted": false,
+                  "hp": 337,
+                  "pp": [
+                    48,
+                    40,
+                    31
+                  ],
+                  "speed": 124,
+                  "status": "tox"
+                }
+              ]
+            },
+            {
+              "active": {
+                "boosts": {
+                  "accuracy": 0,
+                  "atk": 0,
+                  "def": 0,
+                  "evasion": 0,
+                  "spa": 0,
+                  "spd": 0,
+                  "spe": 0
+                },
+                "lastMove": "toxic",
+                "moves": [
+                  [
+                    "takedown",
+                    32,
+                    false
+                  ],
+                  [
+                    "megapunch",
+                    32,
+                    false
+                  ],
+                  [
+                    "toxic",
+                    15,
+                    false
+                  ],
+                  [
+                    "payday",
+                    32,
+                    false
+                  ]
+                ],
+                "slot": 0,
+                "species": "raichu",
+                "stats": {
+                  "atk": 278,
+                  "def": 208,
+                  "spa": 278,
+                  "spd": 278,
+                  "spe": 298
+                },
+                "stored": {
+                  "atk": 278,
+                  "def": 208,
+                  "spa": 278,
+                  "spd": 278,
+                  "spe": 298
+                },
+                "transformed": false,
+                "types": [
+                  "Electric"
+                ],
+                "volatiles": {}
+              },
+              "lastEnemyMove": "toxic",
+              "lastEnemySelectedMove": "toxic",
+              "lastMove": "toxic",
+              "lastSelectedMove": "toxic",
+              "lastSelectedMoveSlot": 2,
+              "left": 1,
+              "order": [
+                0
+              ],
+              "team": [
+                {
+                  "fainted": false,
+                  "hp": 274,
+                  "pp": [
+                    32,
+                    32,
+                    15,
+                    32
+                  ],
+                  "speed": 298,
+                  "status": ""
+                }
+              ]
+            }
+          ],
+          "turn": 2,
+          "winner": ""
+        }
+      }
+    ],
+    "end": {
+      "ended": true,
+      "turn": 5,
+      "winner": "p2"
+    },
+    "error": null
+  },
+  "divergence": {
+    "id": "s31-588-shrink8",
+    "step": 1,
+    "turn": 2,
+    "kind": "Rng",
+    "category": "rng: showdown[getDamage<moveHit] ours[SetStatus.speedSort]",
+    "moves": [
+      "Toxic",
+      "Swift"
+    ],
+    "details": "choices [\"move 3\", \"move 3\"]\nfirst PRNG mismatch at call #1\n  #0  sd: BattleActions.tryMoveHit@scripts.js:414 < BattleActions.useMoveInner@scripts.js:337 < BattleActions.useMove@scripts.js:280(0,256)=166\n       ours: tryMoveHit.accuracy(0,256)=166\n  #1* sd: BattleActions.getDamage@scripts.js:694 < BattleActions.moveHit@scripts.js:515 < BattleActions.tryMoveHit@scripts.js:450(0,256)=202\n       ours: SetStatus.speedSort(0,2)=1\n  #2  sd: BattleActions.getDamage@scripts.js:779 < BattleActions.moveHit@scripts.js:515 < BattleActions.tryMoveHit@scripts.js:450(217,256)=226\n       ours: getDamage.crit(0,256)=60\n  #3  sd: -\n       ours: getDamage.random(217,256)=219\nlog:\n|move|p2a: Raichu|Toxic|p1a: Slowpoke\n|-status|p1a: Slowpoke|tox\n|move|p1a: Slowpoke|Swift|p2a: Raichu\n|split|p2\n|-damage|p2a: Raichu|274/323\n|-damage|p2a: Raichu|85/100\n|split|p1\n|-damage|p1a: Slowpoke|337/359 tox|[from] psn\n|-damage|p1a: Slowpoke|94/100 tox|[from] psn\n|upkeep\n|turn|2\n"
+  },
+  "note": "category: rng: showdown[getDamage<moveHit] ours[SetStatus.speedSort]; shrunk from s31-588 (step 29) to 1+1 Pokémon, step 1"
+}

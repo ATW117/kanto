@@ -106,6 +106,7 @@ fn main() {
         "fuzz" => fuzz(&args),
         "replay" => replay_files(&args),
         "fixtures" => fixtures(&args),
+        "shrink" => shrink(&args),
         "bench" => bench::bench(args.num("battles", 2000) as usize, args.num("seed", 1), &args.get("teams", "randbats")),
         "diff-pkmn" => {
             let compat = if args.get("compat", "pkmn") == "vanilla" { sim_gen1::Compat::Vanilla } else { sim_gen1::Compat::Pkmn };
@@ -133,10 +134,11 @@ fn fuzz(args: &Args) {
     let mut rng = Rng::new(seed);
     let prng = args.get("prng", "gen5");
     let mut specs: Vec<Spec> = (0..n).map(|i| random_spec(format!("s{seed}-{i}"), &mut rng, kind, &format, &patch, &prng)).collect();
-    if let Some(ms) = args.kv.get("max-steps") {
-        for s in specs.iter_mut() {
+    for s in specs.iter_mut() {
+        if let Some(ms) = args.kv.get("max-steps") {
             s.max_steps = Some(ms.parse().expect("--max-steps"));
         }
+        s.sim_compat = args.kv.get("sim-compat").cloned();
     }
     let started = std::time::Instant::now();
     let mut report = Report { battles: n, ..Default::default() };
@@ -146,6 +148,13 @@ fn fuzz(args: &Args) {
     let mut errors = Vec::new();
     let mut done = 0;
     let mut steps_before = 0usize;
+    // Regression corpus: matched battles (truncated) that cover moves not yet covered.
+    let corpus_dir = args.kv.get("corpus").map(PathBuf::from);
+    let corpus_steps = args.num("corpus-steps", 1000) as usize;
+    let corpus_min = args.num("corpus-min", 0) as usize;
+    let mut corpus_lines = String::new();
+    let mut corpus_moves = std::collections::BTreeSet::new();
+    let mut corpus_n = 0;
     sd.run(&specs, jobs, |i, line| {
         done += 1;
         let trace: Trace = match serde_json::from_str(&line) {
@@ -199,6 +208,25 @@ fn fuzz(args: &Args) {
                     }
                     _ => {}
                 }
+            }
+        }
+        if let (Some(file), Replay::Match { .. }) = (&corpus_dir, &res) {
+            let upto = corpus_steps.min(trace.steps.len());
+            let mut new = false;
+            for st in &trace.steps[..upto] {
+                for l in &st.log {
+                    let parts: Vec<&str> = l.split('|').collect();
+                    if parts.len() >= 4 && parts[1] == "move" && corpus_moves.insert(parts[3].to_string()) {
+                        new = true;
+                    }
+                }
+            }
+            if new || corpus_n < corpus_min {
+                let c = replay::Compact::from_trace(&specs[i], &trace, upto);
+                corpus_lines.push_str(&serde_json::to_string(&c).unwrap());
+                corpus_lines.push('\n');
+                let _ = file;
+                corpus_n += 1;
             }
         }
         match res {
@@ -260,6 +288,13 @@ fn fuzz(args: &Args) {
     std::fs::write(out.join("report.json"), serde_json::to_string_pretty(&report).unwrap()).unwrap();
     std::fs::write(out.join("showdown_errors.txt"), errors.join("\n")).unwrap();
     print_report(&report, started.elapsed().as_secs_f64(), &format, &patch, &args.get("teams", "mixed"));
+    if let Some(file) = &corpus_dir {
+        if let Some(parent) = file.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(file, corpus_lines).unwrap();
+        eprintln!("saved {corpus_n} corpus battles covering {} moves to {}", corpus_moves.len(), file.display());
+    }
     if let Some(dir) = args.kv.get("fixtures") {
         save_fixtures(Path::new(dir), &failures);
     }
@@ -352,7 +387,7 @@ fn replay_files(args: &Args) {
 fn fixtures(args: &Args) {
     let dir = PathBuf::from(args.get("dir", &repo_root().join("parity/fixtures").to_string_lossy()));
     let mut bad = 0;
-    for sub in ["passing", "open"] {
+    for sub in ["passing", "divergent", "open"] {
         let d = dir.join(sub);
         let Ok(rd) = std::fs::read_dir(&d) else { continue };
         let mut files: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "json")).collect();
@@ -361,14 +396,23 @@ fn fixtures(args: &Args) {
         for p in &files {
             for f in load_failures(p) {
                 match replay(&f.spec, &f.trace) {
-                    Replay::Match { .. } => ok += 1,
+                    Replay::Match { .. } => {
+                        ok += 1;
+                        if sub == "divergent" {
+                            bad += 1;
+                            println!("HARNESS REGRESSION {}: expected a divergence", p.display());
+                        }
+                    }
                     Replay::Diverged(d) => {
                         div += 1;
                         if sub == "passing" {
                             bad += 1;
                             println!("REGRESSION {}: {}", p.display(), d.category);
+                        } else if sub == "divergent" && f.divergence.as_ref().is_some_and(|e| e.category != d.category) {
+                            bad += 1;
+                            println!("HARNESS REGRESSION {}: category {} != {}", p.display(), d.category, f.divergence.as_ref().unwrap().category);
                         } else if args.flag("verbose") {
-                            println!("open {}: step {} {}", p.file_name().unwrap().to_string_lossy(), d.step, d.category);
+                            println!("{sub} {}: step {} {}", p.file_name().unwrap().to_string_lossy(), d.step, d.category);
                         }
                     }
                 }
@@ -376,7 +420,102 @@ fn fixtures(args: &Args) {
         }
         println!("{sub}: {ok} match, {div} diverge ({} files)", files.len());
     }
+    // Compact corpora (Node-free regression replays).
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        let mut files: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "jsonl")).collect();
+        files.sort();
+        for p in files {
+            let text = std::fs::read_to_string(&p).unwrap();
+            let (mut ok, mut steps) = (0, 0);
+            for (k, line) in text.lines().filter(|l| !l.trim().is_empty()).enumerate() {
+                let c: replay::Compact = serde_json::from_str(line).unwrap_or_else(|e| panic!("{}:{}: {e}", p.display(), k + 1));
+                steps += c.steps.len();
+                match c.check() {
+                    Ok(()) => ok += 1,
+                    Err((step, what)) => {
+                        bad += 1;
+                        println!("REGRESSION {}:{} ({}): step {step}: {what}", p.display(), k + 1, c.spec.id);
+                    }
+                }
+            }
+            println!("{}: {ok} battles / {steps} steps match", p.file_name().unwrap().to_string_lossy());
+        }
+    }
     if bad > 0 {
         std::process::exit(1);
+    }
+}
+
+/// Minimise failing battles: for each failure, search random battles between only the Pokémon
+/// involved in the divergent step (their full sets) and keep the earliest-diverging one with the
+/// same category; save it (choices made explicit, trace truncated) as a fixture.
+fn shrink(args: &Args) {
+    let attempts = args.num("attempts", 200) as usize;
+    let jobs = args.num("jobs", 4) as usize;
+    let out = PathBuf::from(args.get("out", &repo_root().join("parity/fixtures/open").to_string_lossy()));
+    std::fs::create_dir_all(&out).unwrap();
+    let repo = repo_root();
+    let sd = runner::Showdown::locate(&repo, args.kv.get("ps-dir").map(|s| s.as_str())).unwrap_or_else(|e| panic!("{e}"));
+    let mut seen = std::collections::BTreeSet::new();
+    let mut rng = Rng::new(args.num("seed", 1));
+    for path in &args.pos[1..] {
+        for f in load_failures(Path::new(path)) {
+            let Some(d) = f.divergence.clone() else { continue };
+            if !seen.insert(d.category.clone()) {
+                continue;
+            }
+            // Pokémon involved: actives before and after the divergent step.
+            let mut involved: [Vec<usize>; 2] = [vec![], vec![]];
+            for st in [d.step.saturating_sub(1), d.step] {
+                let Some(step) = f.trace.steps.get(st) else { continue };
+                for p in 0..2 {
+                    if let Some(slot) = step.state["sides"][p]["active"]["slot"].as_u64() {
+                        if !involved[p].contains(&(slot as usize)) {
+                            involved[p].push(slot as usize);
+                        }
+                    }
+                }
+            }
+            let teams = [&f.spec.p1, &f.spec.p2];
+            let reduced: Vec<Vec<spec::SetJson>> = (0..2).map(|p| involved[p].iter().map(|&i| teams[p][i].clone()).collect()).collect();
+            let specs: Vec<Spec> = (0..attempts)
+                .map(|k| {
+                    let mut s = f.spec.clone();
+                    s.id = format!("{}-shrink{k}", f.spec.id);
+                    s.p1 = reduced[0].clone();
+                    s.p2 = reduced[1].clone();
+                    s.seed = spec::seed_string(rng.next_u64());
+                    s.choice_seed = rng.next_u64() as u32;
+                    s.choices = None;
+                    s
+                })
+                .collect();
+            let mut best: Failure = f.clone();
+            let mut best_step = d.step;
+            let mut best_size = f.spec.p1.len() + f.spec.p2.len();
+            sd.run(&specs, jobs, |i, line| {
+                let Ok(trace) = serde_json::from_str::<Trace>(&line) else { return };
+                if trace.error.is_some() {
+                    return;
+                }
+                if let Replay::Diverged(nd) = replay(&specs[i], &trace) {
+                    let size = specs[i].p1.len() + specs[i].p2.len();
+                    if nd.category == d.category && (nd.step, size) < (best_step, best_size) {
+                        best_step = nd.step;
+                        best_size = size;
+                        let mut t = trace.clone();
+                        t.steps.truncate(nd.step + 1);
+                        best = Failure { spec: specs[i].clone(), trace: t, divergence: Some(*nd), note: String::new() };
+                    }
+                }
+            })
+            .unwrap_or_else(|e| panic!("{e}"));
+            best.trace.steps.truncate(best_step + 1);
+            best.spec.choices = Some(best.trace.steps.iter().skip(1).map(|s| s.choices.clone()).collect());
+            best.note = format!("category: {}; shrunk from {} (step {}) to {}+{} Pokémon, step {}", d.category, f.spec.id, d.step, best.spec.p1.len(), best.spec.p2.len(), best_step);
+            println!("{}", best.note);
+            let name = format!("{}-{}.json", slug(&d.category), slug(&best.spec.id));
+            std::fs::write(out.join(name), serde_json::to_string_pretty(&best).unwrap()).unwrap();
+        }
     }
 }

@@ -218,3 +218,79 @@ pub fn replay(spec: &Spec, trace: &Trace) -> Replay {
     trace::stop();
     Replay::Match { steps: trace.steps.len() }
 }
+
+// ---- Compact regression corpus ------------------------------------------------------------------
+
+/// FNV-1a over bytes.
+fn fnv(h: u64, bytes: &[u8]) -> u64 {
+    let mut h = h;
+    for &b in bytes {
+        h = (h ^ b as u64).wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+/// Hash of a state snapshot in canonical form (object keys sorted, as serde_json's default map).
+pub fn state_hash(v: &Value) -> u64 {
+    fnv(0xcbf29ce484222325, serde_json::to_string(v).unwrap().as_bytes())
+}
+
+
+/// Compact choice-list encoding: `m<k>` move, `s<k>` switch, `p` pass, concatenated.
+fn encode_legal(l: &[String]) -> String {
+    l.iter()
+        .map(|c| match Choice::parse(c) {
+            Some(Choice::Move(k)) => format!("m{k}"),
+            Some(Choice::Switch(k)) => format!("s{k}"),
+            _ => "p".into(),
+        })
+        .collect()
+}
+
+/// A battle replayable without Node: the spec (with explicit choices) and, per step, Showdown's
+/// legal choices before it and a hash of its state after it, as `"<p1 legal>,<p2 legal>,<hex>"`.
+/// The state includes the PRNG seed, so any difference in PRNG use changes the hash.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Compact {
+    pub spec: Spec,
+    pub steps: Vec<String>,
+}
+
+impl Compact {
+    pub fn from_trace(spec: &Spec, trace: &Trace, upto: usize) -> Compact {
+        let steps: Vec<String> = trace.steps[..upto]
+            .iter()
+            .map(|st| format!("{},{},{:016x}", encode_legal(&st.legal[0]), encode_legal(&st.legal[1]), state_hash(&st.state)))
+            .collect();
+        let mut spec = spec.clone();
+        spec.choices = Some(trace.steps[1..upto].iter().map(|s| s.choices.clone()).collect());
+        Compact { spec, steps }
+    }
+
+    /// Replay; `Err((step, what))` at the first mismatch.
+    pub fn check(&self) -> Result<(), (usize, String)> {
+        let (t1, t2) = self.spec.teams().map_err(|e| (0, e))?;
+        let mut b = Battle::new(&t1, &t2, self.spec.prng(), self.spec.rules());
+        let choices = self.spec.choices.clone().unwrap_or_default();
+        for (i, st) in self.steps.iter().enumerate() {
+            let parts: Vec<&str> = st.split(',').collect();
+            if parts.len() != 3 {
+                return Err((i, format!("bad step '{st}'")));
+            }
+            if i > 0 {
+                for p in 0..2 {
+                    let ours = encode_legal(&choice_strings(&b, p));
+                    if ours != parts[p] {
+                        return Err((i, format!("p{} legal: showdown {} ours {}", p + 1, parts[p], ours)));
+                    }
+                }
+            }
+            let c = if i == 0 { [String::new(), String::new()] } else { choices[i - 1].clone() };
+            b.apply_choices(Choice::parse(&c[0]).unwrap_or_default(), Choice::parse(&c[1]).unwrap_or_default(), &mut ());
+            if format!("{:016x}", state_hash(&snapshot(&b))) != parts[2] {
+                return Err((i, "state (or PRNG seed) differs".into()));
+            }
+        }
+        Ok(())
+    }
+}

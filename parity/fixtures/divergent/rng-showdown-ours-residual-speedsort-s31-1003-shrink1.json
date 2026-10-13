@@ -1,0 +1,715 @@
+{
+  "spec": {
+    "id": "s31-1003-shrink1",
+    "format": "gen1ou",
+    "patch": "pkmn",
+    "seed": "29711,12303,62219,50344",
+    "p1": [
+      {
+        "species": "Haunter",
+        "moves": [
+          "metronome",
+          "bind"
+        ],
+        "level": 100,
+        "ivs": {
+          "atk": 30,
+          "def": 30,
+          "hp": 30,
+          "spa": 30,
+          "spd": 30,
+          "spe": 30
+        },
+        "evs": {
+          "atk": 255,
+          "def": 255,
+          "hp": 255,
+          "spa": 255,
+          "spd": 255,
+          "spe": 255
+        }
+      }
+    ],
+    "p2": [
+      {
+        "species": "Gyarados",
+        "moves": [
+          "firespin",
+          "pound",
+          "mirrormove"
+        ],
+        "level": 91,
+        "ivs": {
+          "atk": 10,
+          "def": 30,
+          "hp": 30,
+          "spa": 26,
+          "spd": 26,
+          "spe": 2
+        },
+        "evs": {
+          "atk": 255,
+          "def": 180,
+          "hp": 255,
+          "spa": 197,
+          "spd": 197,
+          "spe": 255
+        }
+      }
+    ],
+    "choices": [
+      [
+        "move 1",
+        "move 1"
+      ],
+      [
+        "move 1",
+        "move 1"
+      ]
+    ],
+    "choiceSeed": 828278906,
+    "simCompat": "vanilla"
+  },
+  "trace": {
+    "id": "s31-1003-shrink1",
+    "seed": "29711,12303,62219,50344",
+    "steps": [
+      {
+        "choices": [
+          "",
+          ""
+        ],
+        "legal": [
+          [],
+          []
+        ],
+        "requests": [
+          "",
+          ""
+        ],
+        "log": [
+          "|gametype|singles",
+          "|player|p1|p1||",
+          "|player|p2|p2||",
+          "|gen|1",
+          "|tier|[Gen 1] OU",
+          "|rule|Desync Clause Mod: Desyncs resolve to link battle behavior from the acting player's perspective.",
+          "|rule|HP Percentage Mod: HP is shown in percentages",
+          "|rule|Endless Battle Clause: Forcing endless battles is banned",
+          "|rule|Sleep Clause Mod: Limit one foe put to sleep",
+          "|rule|Freeze Clause Mod: Limit one foe frozen",
+          "|rule|Species Clause: Limit one of each Pokémon",
+          "|rule|OHKO Clause: OHKO moves are banned",
+          "|rule|Evasion Moves Clause: Evasion moves are banned",
+          "|teamsize|p1|1",
+          "|teamsize|p2|1",
+          "|start",
+          "|split|p1",
+          "|switch|p1a: Haunter|Haunter|293/293",
+          "|switch|p1a: Haunter|Haunter|100/100",
+          "|split|p2",
+          "|switch|p2a: Gyarados|Gyarados, L91|358/358",
+          "|switch|p2a: Gyarados|Gyarados, L91|100/100",
+          "|turn|1"
+        ],
+        "rng": [],
+        "state": {
+          "ended": false,
+          "lastDamage": 0,
+          "seed": "29711,12303,62219,50344",
+          "sides": [
+            {
+              "active": {
+                "boosts": {
+                  "accuracy": 0,
+                  "atk": 0,
+                  "def": 0,
+                  "evasion": 0,
+                  "spa": 0,
+                  "spd": 0,
+                  "spe": 0
+                },
+                "lastMove": null,
+                "moves": [
+                  [
+                    "metronome",
+                    16,
+                    false
+                  ],
+                  [
+                    "bind",
+                    32,
+                    false
+                  ]
+                ],
+                "slot": 0,
+                "species": "haunter",
+                "stats": {
+                  "atk": 198,
+                  "def": 188,
+                  "spa": 328,
+                  "spd": 328,
+                  "spe": 288
+                },
+                "stored": {
+                  "atk": 198,
+                  "def": 188,
+                  "spa": 328,
+                  "spd": 328,
+                  "spe": 288
+                },
+                "transformed": false,
+                "types": [
+                  "Ghost",
+                  "Poison"
+                ],
+                "volatiles": {}
+              },
+              "lastEnemyMove": null,
+              "lastEnemySelectedMove": "nomove",
+              "lastMove": null,
+              "lastSelectedMove": "nomove",
+              "lastSelectedMoveSlot": 0,
+              "left": 1,
+              "order": [
+                0
+              ],
+              "team": [
+                {
+                  "fainted": false,
+                  "hp": 293,
+                  "pp": [
+                    16,
+                    32
+                  ],
+                  "speed": 288,
+                  "status": ""
+                }
+              ]
+            },
+            {
+              "active": {
+                "boosts": {
+                  "accuracy": 0,
+                  "atk": 0,
+                  "def": 0,
+                  "evasion": 0,
+                  "spa": 0,
+                  "spd": 0,
+                  "spe": 0
+                },
+                "lastMove": null,
+                "moves": [
+                  [
+                    "firespin",
+                    24,
+                    false
+                  ],
+                  [
+                    "pound",
+                    56,
+                    false
+                  ],
+                  [
+                    "mirrormove",
+                    32,
+                    false
+                  ]
+                ],
+                "slot": 0,
+                "species": "gyarados",
+                "stats": {
+                  "atk": 298,
+                  "def": 217,
+                  "spa": 255,
+                  "spd": 255,
+                  "spe": 211
+                },
+                "stored": {
+                  "atk": 298,
+                  "def": 217,
+                  "spa": 255,
+                  "spd": 255,
+                  "spe": 211
+                },
+                "transformed": false,
+                "types": [
+                  "Water",
+                  "Flying"
+                ],
+                "volatiles": {}
+              },
+              "lastEnemyMove": null,
+              "lastEnemySelectedMove": "nomove",
+              "lastMove": null,
+              "lastSelectedMove": "nomove",
+              "lastSelectedMoveSlot": 0,
+              "left": 1,
+              "order": [
+                0
+              ],
+              "team": [
+                {
+                  "fainted": false,
+                  "hp": 358,
+                  "pp": [
+                    24,
+                    56,
+                    32
+                  ],
+                  "speed": 211,
+                  "status": ""
+                }
+              ]
+            }
+          ],
+          "turn": 1,
+          "winner": ""
+        }
+      },
+      {
+        "choices": [
+          "move 1",
+          "move 1"
+        ],
+        "legal": [
+          [
+            "move 1",
+            "move 2"
+          ],
+          [
+            "move 1",
+            "move 2",
+            "move 3"
+          ]
+        ],
+        "requests": [
+          "move",
+          "move"
+        ],
+        "log": [
+          "|move|p1a: Haunter|Metronome|p1a: Haunter",
+          "|move|p1a: Haunter|Sky Attack||[from] Metronome|[still]",
+          "|-prepare|p1a: Haunter|Sky Attack",
+          "|move|p2a: Gyarados|Fire Spin|p1a: Haunter",
+          "|-crit|p1a: Haunter",
+          "|split|p1",
+          "|-damage|p1a: Haunter|276/293",
+          "|-damage|p1a: Haunter|95/100",
+          "|upkeep",
+          "|turn|2"
+        ],
+        "rng": [
+          [
+            "Battle.onHit@moves.js:467 < Battle.singleEvent@battle.js:444 < BattleActions.moveHit@scripts.js:599",
+            0,
+            163,
+            141
+          ],
+          [
+            "BattleActions.tryMoveHit@scripts.js:414 < BattleActions.useMoveInner@scripts.js:337 < BattleActions.useMove@scripts.js:280",
+            0,
+            256,
+            137
+          ],
+          [
+            "BattleActions.getDamage@scripts.js:694 < BattleActions.moveHit@scripts.js:515 < BattleActions.tryMoveHit@scripts.js:450",
+            0,
+            256,
+            22
+          ],
+          [
+            "BattleActions.getDamage@scripts.js:779 < BattleActions.moveHit@scripts.js:515 < BattleActions.tryMoveHit@scripts.js:450",
+            217,
+            256,
+            234
+          ],
+          [
+            "Battle.durationCallback@conditions.js:241 < Pokemon.addVolatile@pokemon.js:1513 < BattleActions.moveHit@scripts.js:585",
+            0,
+            8,
+            0
+          ]
+        ],
+        "state": {
+          "ended": false,
+          "lastDamage": 17,
+          "seed": "5217,25830,41186,64495",
+          "sides": [
+            {
+              "active": {
+                "boosts": {
+                  "accuracy": 0,
+                  "atk": 0,
+                  "def": 0,
+                  "evasion": 0,
+                  "spa": 0,
+                  "spd": 0,
+                  "spe": 0
+                },
+                "lastMove": "metronome",
+                "moves": [
+                  [
+                    "metronome",
+                    16,
+                    false
+                  ],
+                  [
+                    "bind",
+                    32,
+                    false
+                  ]
+                ],
+                "slot": 0,
+                "species": "haunter",
+                "stats": {
+                  "atk": 198,
+                  "def": 188,
+                  "spa": 328,
+                  "spd": 328,
+                  "spe": 288
+                },
+                "stored": {
+                  "atk": 198,
+                  "def": 188,
+                  "spa": 328,
+                  "spd": 328,
+                  "spe": 288
+                },
+                "transformed": false,
+                "types": [
+                  "Ghost",
+                  "Poison"
+                ],
+                "volatiles": {
+                  "partiallytrapped": {
+                    "duration": 1
+                  },
+                  "twoturnmove": {
+                    "move": "skyattack"
+                  }
+                }
+              },
+              "lastEnemyMove": "skyattack",
+              "lastEnemySelectedMove": "skyattack",
+              "lastMove": "skyattack",
+              "lastSelectedMove": "skyattack",
+              "lastSelectedMoveSlot": 0,
+              "left": 1,
+              "order": [
+                0
+              ],
+              "team": [
+                {
+                  "fainted": false,
+                  "hp": 276,
+                  "pp": [
+                    16,
+                    32
+                  ],
+                  "speed": 288,
+                  "status": ""
+                }
+              ]
+            },
+            {
+              "active": {
+                "boosts": {
+                  "accuracy": 0,
+                  "atk": 0,
+                  "def": 0,
+                  "evasion": 0,
+                  "spa": 0,
+                  "spd": 0,
+                  "spe": 0
+                },
+                "lastMove": "firespin",
+                "moves": [
+                  [
+                    "firespin",
+                    23,
+                    false
+                  ],
+                  [
+                    "pound",
+                    56,
+                    false
+                  ],
+                  [
+                    "mirrormove",
+                    32,
+                    false
+                  ]
+                ],
+                "slot": 0,
+                "species": "gyarados",
+                "stats": {
+                  "atk": 298,
+                  "def": 217,
+                  "spa": 255,
+                  "spd": 255,
+                  "spe": 211
+                },
+                "stored": {
+                  "atk": 298,
+                  "def": 217,
+                  "spa": 255,
+                  "spd": 255,
+                  "spe": 211
+                },
+                "transformed": false,
+                "types": [
+                  "Water",
+                  "Flying"
+                ],
+                "volatiles": {
+                  "partialtrappinglock": {
+                    "damage": 17,
+                    "duration": 1,
+                    "move": "firespin",
+                    "totalDuration": 2
+                  }
+                }
+              },
+              "lastEnemyMove": "firespin",
+              "lastEnemySelectedMove": "firespin",
+              "lastMove": "firespin",
+              "lastSelectedMove": "firespin",
+              "lastSelectedMoveSlot": 0,
+              "left": 1,
+              "order": [
+                0
+              ],
+              "team": [
+                {
+                  "fainted": false,
+                  "hp": 358,
+                  "pp": [
+                    23,
+                    56,
+                    32
+                  ],
+                  "speed": 211,
+                  "status": ""
+                }
+              ]
+            }
+          ],
+          "turn": 2,
+          "winner": ""
+        }
+      },
+      {
+        "choices": [
+          "move 1",
+          "move 1"
+        ],
+        "legal": [
+          [
+            "move 1"
+          ],
+          [
+            "move 1"
+          ]
+        ],
+        "requests": [
+          "move",
+          "move"
+        ],
+        "log": [
+          "|cant|p1a: Haunter|partiallytrapped",
+          "|move|p2a: Gyarados|Fire Spin|p1a: Haunter|[from] Fire Spin",
+          "|split|p1",
+          "|-damage|p1a: Haunter|259/293",
+          "|-damage|p1a: Haunter|89/100",
+          "|upkeep",
+          "|turn|3"
+        ],
+        "rng": [],
+        "state": {
+          "ended": false,
+          "lastDamage": 17,
+          "seed": "5217,25830,41186,64495",
+          "sides": [
+            {
+              "active": {
+                "boosts": {
+                  "accuracy": 0,
+                  "atk": 0,
+                  "def": 0,
+                  "evasion": 0,
+                  "spa": 0,
+                  "spd": 0,
+                  "spe": 0
+                },
+                "lastMove": "metronome",
+                "moves": [
+                  [
+                    "metronome",
+                    16,
+                    false
+                  ],
+                  [
+                    "bind",
+                    32,
+                    false
+                  ]
+                ],
+                "slot": 0,
+                "species": "haunter",
+                "stats": {
+                  "atk": 198,
+                  "def": 188,
+                  "spa": 328,
+                  "spd": 328,
+                  "spe": 288
+                },
+                "stored": {
+                  "atk": 198,
+                  "def": 188,
+                  "spa": 328,
+                  "spd": 328,
+                  "spe": 288
+                },
+                "transformed": false,
+                "types": [
+                  "Ghost",
+                  "Poison"
+                ],
+                "volatiles": {
+                  "fakepartiallytrapped": {
+                    "duration": 1
+                  },
+                  "twoturnmove": {
+                    "move": "skyattack"
+                  }
+                }
+              },
+              "lastEnemyMove": "skyattack",
+              "lastEnemySelectedMove": "metronome",
+              "lastMove": "skyattack",
+              "lastSelectedMove": "skyattack",
+              "lastSelectedMoveSlot": 0,
+              "left": 1,
+              "order": [
+                0
+              ],
+              "team": [
+                {
+                  "fainted": false,
+                  "hp": 259,
+                  "pp": [
+                    16,
+                    32
+                  ],
+                  "speed": 288,
+                  "status": ""
+                }
+              ]
+            },
+            {
+              "active": {
+                "boosts": {
+                  "accuracy": 0,
+                  "atk": 0,
+                  "def": 0,
+                  "evasion": 0,
+                  "spa": 0,
+                  "spd": 0,
+                  "spe": 0
+                },
+                "lastMove": "firespin",
+                "moves": [
+                  [
+                    "firespin",
+                    23,
+                    false
+                  ],
+                  [
+                    "pound",
+                    56,
+                    false
+                  ],
+                  [
+                    "mirrormove",
+                    32,
+                    false
+                  ]
+                ],
+                "slot": 0,
+                "species": "gyarados",
+                "stats": {
+                  "atk": 298,
+                  "def": 217,
+                  "spa": 255,
+                  "spd": 255,
+                  "spe": 211
+                },
+                "stored": {
+                  "atk": 298,
+                  "def": 217,
+                  "spa": 255,
+                  "spd": 255,
+                  "spe": 211
+                },
+                "transformed": false,
+                "types": [
+                  "Water",
+                  "Flying"
+                ],
+                "volatiles": {
+                  "fakepartiallytrapped": {
+                    "duration": 1
+                  }
+                }
+              },
+              "lastEnemyMove": "firespin",
+              "lastEnemySelectedMove": "firespin",
+              "lastMove": "firespin",
+              "lastSelectedMove": "firespin",
+              "lastSelectedMoveSlot": 0,
+              "left": 1,
+              "order": [
+                0
+              ],
+              "team": [
+                {
+                  "fainted": false,
+                  "hp": 358,
+                  "pp": [
+                    23,
+                    56,
+                    32
+                  ],
+                  "speed": 211,
+                  "status": ""
+                }
+              ]
+            }
+          ],
+          "turn": 3,
+          "winner": ""
+        }
+      }
+    ],
+    "end": {
+      "ended": true,
+      "turn": 26,
+      "winner": "p1"
+    },
+    "error": null
+  },
+  "divergence": {
+    "id": "s31-1003-shrink1",
+    "step": 2,
+    "turn": 3,
+    "kind": "Rng",
+    "category": "rng: showdown[-] ours[Residual.speedSort]",
+    "moves": [
+      "cant:partiallytrapped",
+      "Fire Spin"
+    ],
+    "details": "choices [\"move 1\", \"move 1\"]\nfirst PRNG mismatch at call #0\n  #0* sd: -\n       ours: Residual.speedSort(0,2)=0\n  #1  sd: -\n       ours: Residual.speedSort(2,4)=3\nlog:\n|cant|p1a: Haunter|partiallytrapped\n|move|p2a: Gyarados|Fire Spin|p1a: Haunter|[from] Fire Spin\n|split|p1\n|-damage|p1a: Haunter|259/293\n|-damage|p1a: Haunter|89/100\n|upkeep\n|turn|3\n"
+  },
+  "note": "category: rng: showdown[-] ours[Residual.speedSort]; shrunk from s31-1003 (step 3) to 1+1 Pokémon, step 2"
+}
