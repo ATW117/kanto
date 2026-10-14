@@ -2,7 +2,8 @@
 //! `tryMoveHit`, `moveHit` and `getDamage` (data/mods/gen1/scripts.ts) plus the Gen 1 move and
 //! condition callbacks (data/mods/gen1/{moves,conditions}.ts) that run inside them.
 
-use crate::events::Dmg;
+use crate::events::{Direct, Dmg, Heal};
+use crate::proto::{move_name, plog};
 use crate::state::*;
 use sim_core::sort::{key, sort_by_key, KEY_ORDER_UNSET};
 use sim_core::{Cant, Event, Player, Sink};
@@ -168,12 +169,16 @@ impl Battle {
     }
 
     /// Gen 1 `deductPP` (by `side.lastSelectedMoveSlot`), `amount` may be -1.
-    fn deduct_pp(&mut self, p: Player, amount: i32) {
+    fn deduct_pp<S: Sink>(&mut self, p: Player, amount: i32, s: &mut S) {
         let sd = &mut self.sides[p];
         let i = sd.last_selected_move_slot as usize;
         if i >= sd.active.n_slots as usize {
             return;
         }
+        if (sd.slot(i).pp() as i32) - amount < 0 {
+            plog!(s, |l| l.hint("In Gen 1, if a Pokémon is forced to use a move with 0 PP, the move will underflow to have 63 PP.", false, Some(p)));
+        }
+        let sd = &mut self.sides[p];
         let slot = sd.slot_mut(i);
         slot.set_pp((slot.pp() as i32 - amount).rem_euclid(64) as u8);
         let pp = slot.pp();
@@ -196,18 +201,27 @@ impl Battle {
 
     /// Gen 1 `BattleActions#runMove` for the active of `p` executing `id`.
     pub(crate) fn run_move<S: Sink>(&mut self, p: Player, id: u8, s: &mut S) {
+        let target = self.target_of(p, id);
         if id == pm::CANNOTMOVE {
-            self.after_move_self(p, s);
+            plog!(s, |l| {
+                if self.sides[p].mon().status == st::SLP {
+                    l.hint("In Gen 1, if a Pokémon spends a turn partially trapped and switches to a Pokémon that is asleep, the sleep counter will not decrease until you select a move with a different Pokémon.", false, None);
+                } else if self.locked_move(p).is_some() {
+                    l.hint("In Gen 1, when Haze cures the sleep/freeze status of a Pokémon during a multi-turn move, that Pokémon will become soft-locked.", false, None);
+                } else if self.semi_locked_move(p, false).is_some() {
+                    l.hint("In Gen 1, when Haze cures the sleep/freeze status of a Pokémon during Bide, the move execution will never resolve.", false, None);
+                }
+            });
+            self.after_move_self(p, Some(target), s);
             return;
         }
-        let target = self.target_of(p, id);
         self.sides[target].mon_mut().set_sub_fainted(false);
         if self.sides[p].active.move_this_turn != 0 || !self.before_move(p, target, id, s) {
-            self.after_move_self(p, s);
+            self.after_move_self(p, Some(target), s);
             return;
         }
         if id == mv::BIDE && self.sides[p].active.has(v::BIDE) {
-            self.after_move_self(p, s);
+            self.after_move_self(p, Some(target), s);
             return;
         }
         let mut source_effect = None;
@@ -217,8 +231,17 @@ impl Battle {
                 source_effect = Some(id);
             }
             if (locked.is_none() && !is_two_turn(id)) || self.sides[p].active.has(v::TWOTURNMOVE) {
-                self.deduct_pp(p, 1);
+                self.deduct_pp(p, 1, s);
             }
+            if locked.is_none() && id != self.sides[p].last_enemy_selected_move {
+                plog!(s, |l| {
+                    l.hint("Desync Clause Mod activated!", false, None);
+                    l.hint("In Gen 1, if both players would see the same Pokémon using different moves, the Pokemon defaults to the move shown from the perspective of the player controlling that Pokémon.", false, None);
+                });
+            }
+        }
+        if id == pm::NOMOVE {
+            plog!(s, |l| l.hint("In Gen 1, if a Pokémon is thawed from freeze and no move has been selected yet, the Pokémon will use a move with Fissure's animation, 102 base power, ??? type, Special category, and around 31.6% accuracy.", false, None));
         }
         let m = Mv::new(id);
         self.use_move(p, m, Some(target), source_effect, s);
@@ -264,6 +287,12 @@ impl Battle {
         }
         sort_by_key(&mut self.rng, &mut list[..n], "BeforeMove.speedSort");
         let slot = self.sides[p].order[0];
+        let cant = |b: &Battle, s: &mut S, why: &str| {
+            plog!(s, |l| {
+                let i = b.ident(l, p);
+                l.add(format!("|cant|{i}|{why}"));
+            });
+        };
         for &(_, h) in &list[..n] {
             match h {
                 100 => {
@@ -271,6 +300,7 @@ impl Battle {
                         continue;
                     }
                     s.event(Event::Cant { player: p, slot, reason: Cant::Freeze, mv: 0 });
+                    cant(self, s, "frz");
                     self.sides[p].active.last_move = 0;
                     return false;
                 }
@@ -282,6 +312,7 @@ impl Battle {
                     m.slp_time -= 1;
                     if m.slp_time > 0 {
                         s.event(Event::Cant { player: p, slot, reason: Cant::Sleep, mv: 0 });
+                        cant(self, s, "slp");
                     }
                     self.sides[p].active.last_move = 0;
                     return false;
@@ -292,39 +323,46 @@ impl Battle {
                     }
                     if self.rng.chance(63, 256, "par.onBeforeMove") {
                         s.event(Event::Cant { player: p, slot, reason: Cant::Paralysis, mv: 0 });
-                        self.remove_volatile(p, v::BIDE);
-                        self.remove_volatile(p, v::TWOTURNMOVE);
-                        self.remove_volatile(p, v::PARTIALTRAPPINGLOCK);
-                        self.remove_volatile(p, v::LOCKEDMOVE);
+                        cant(self, s, "par");
+                        self.remove_volatile(p, v::BIDE, s);
+                        if self.remove_volatile(p, v::TWOTURNMOVE, s) && self.sides[p].active.has(v::INVULNERABILITY) {
+                            plog!(s, |l| l.hint("In Gen 1, when a Dig/Fly user is fully paralyzed while semi-invulnerable, it will remain semi-invulnerable until it switches out or fully executes Dig/Fly", true, None));
+                        }
+                        self.remove_volatile(p, v::PARTIALTRAPPINGLOCK, s);
+                        self.remove_volatile(p, v::LOCKEDMOVE, s);
                         return false;
                     }
                 }
                 _ if !self.sides[p].active.has(h) => continue,
                 v::PARTIALLYTRAPPED => {
                     s.event(Event::Cant { player: p, slot, reason: Cant::PartiallyTrapped, mv: 0 });
+                    cant(self, s, "partiallytrapped");
                     return false;
                 }
                 v::FLINCH => {
                     s.event(Event::Cant { player: p, slot, reason: Cant::Flinch, mv: 0 });
+                    cant(self, s, "flinch");
                     return false;
                 }
                 v::MUSTRECHARGE => {
                     s.event(Event::Cant { player: p, slot, reason: Cant::Recharge, mv: 0 });
-                    self.remove_volatile(p, v::MUSTRECHARGE);
+                    cant(self, s, "recharge");
+                    self.remove_volatile(p, v::MUSTRECHARGE, s);
                     return false;
                 }
                 v::DISABLE => {
                     let a = &mut self.sides[p].active;
                     a.disable_time -= 1;
                     if a.disable_time == 0 {
-                        self.remove_volatile(p, v::DISABLE);
+                        self.remove_volatile(p, v::DISABLE, s);
                         continue;
                     }
                     let used = if a.has(v::BIDE) { mv::BIDE } else { id };
                     if used == a.disable_move {
                         let dm = a.disable_move;
                         s.event(Event::Cant { player: p, slot, reason: Cant::Disable, mv: dm });
-                        self.remove_volatile(p, v::TWOTURNMOVE);
+                        cant(self, s, &format!("Disable|{}", move_name(dm)));
+                        self.remove_volatile(p, v::TWOTURNMOVE, s);
                         return false;
                     }
                 }
@@ -332,20 +370,24 @@ impl Battle {
                     let a = &mut self.sides[p].active;
                     a.confusion_time -= 1;
                     if a.confusion_time == 0 {
-                        self.remove_volatile(p, v::CONFUSION);
+                        self.remove_volatile(p, v::CONFUSION, s);
                         continue;
                     }
+                    plog!(s, |l| {
+                        let i = self.ident(l, p);
+                        l.add(format!("|-activate|{i}|confusion"));
+                    });
                     if !self.rng.chance(128, 256, "confusion.onBeforeMove") {
                         let lvl = self.sides[p].mon().level as u64;
                         let atk = self.sides[p].active.modified[0] as u64;
                         let def = self.sides[p].active.modified[1] as u64;
                         let d = ((lvl * 2 / 5 + 2) * atk * 40 / def) / 50 + 2;
-                        self.direct_damage(d as u32, p, true);
-                        self.remove_volatile(p, v::BIDE);
-                        self.remove_volatile(p, v::TWOTURNMOVE);
-                        self.remove_volatile(p, v::INVULNERABILITY);
-                        self.remove_volatile(p, v::PARTIALTRAPPINGLOCK);
-                        self.remove_volatile(p, v::LOCKEDMOVE);
+                        self.direct_damage(d as u32, p, Direct::Confusion, s);
+                        self.remove_volatile(p, v::BIDE, s);
+                        self.remove_volatile(p, v::TWOTURNMOVE, s);
+                        self.remove_volatile(p, v::INVULNERABILITY, s);
+                        self.remove_volatile(p, v::PARTIALTRAPPINGLOCK, s);
+                        self.remove_volatile(p, v::LOCKEDMOVE, s);
                         return false;
                     }
                 }
@@ -353,7 +395,7 @@ impl Battle {
                     let q = 1 - p;
                     let locked = self.sides[p].active.ptl_locked;
                     if target != q || self.sides[q].order[0] != locked {
-                        self.remove_volatile(p, v::PARTIALTRAPPINGLOCK);
+                        self.remove_volatile(p, v::PARTIALTRAPPINGLOCK, s);
                     }
                 }
                 v::BIDE => {
@@ -363,17 +405,29 @@ impl Battle {
                     a.bide_time -= 1;
                     if a.bide_time == 0 {
                         let dmg = a.bide_damage;
+                        plog!(s, |l| {
+                            let i = self.ident(l, p);
+                            l.add(format!("|-end|{i}|Bide"));
+                        });
                         if dmg == 0 {
                             s.event(Event::Fail);
-                            self.remove_volatile(p, v::BIDE);
+                            plog!(s, |l| {
+                                let i = self.ident(l, p);
+                                l.add(format!("|-fail|{i}"));
+                            });
+                            self.remove_volatile(p, v::BIDE, s);
                             return false;
                         }
                         let mut bm = Mv::new(mv::BIDE);
                         let q = 1 - p;
                         self.move_hit(Some(q), p, &mut bm, Md::Fixed(dmg.wrapping_mul(2)), false, false, s);
-                        self.remove_volatile(p, v::BIDE);
+                        self.remove_volatile(p, v::BIDE, s);
                         return false;
                     }
+                    plog!(s, |l| {
+                        let i = self.ident(l, p);
+                        l.add(format!("|-activate|{i}|Bide"));
+                    });
                     return false;
                 }
                 _ => {}
@@ -392,7 +446,7 @@ impl Battle {
         }
         if matches!(source_effect, Some(mv::METRONOME) | Some(mv::MIRRORMOVE)) {
             if is_two_turn(m.id) {
-                self.deduct_pp(p, -1);
+                self.deduct_pp(p, -1, s);
             }
             let sd = &mut self.sides[p];
             let i = sd.last_selected_move_slot as usize;
@@ -416,7 +470,7 @@ impl Battle {
             if m.id != mv::MIRRORMOVE || foe_last == 0 || foe_last == mv::MIRRORMOVE {
                 self.after_move(p, target, s);
                 if self.sides[target].mon().hp > 0 {
-                    self.after_move_self(p, s);
+                    self.after_move_self(p, Some(target), s);
                 }
             }
         }
@@ -428,27 +482,45 @@ impl Battle {
         }
         let slot = self.sides[p].order[0];
         s.event(Event::Move { player: p, slot, mv: m.real_id(), from: source_effect.is_some() });
+        plog!(s, |l| {
+            let user = self.ident(l, p);
+            let tgt = self.ident(l, target);
+            let from = match source_effect {
+                Some(e) => format!("|[from] {}", move_name(e)),
+                None => String::new(),
+            };
+            l.add_move(format!("|move|{user}|{}|{tgt}{from}", move_name(m.id)));
+        });
         // TryMove (move callbacks).
         match m.id {
             mv::RAZORWIND | mv::SOLARBEAM | mv::SKULLBASH | mv::SKYATTACK | mv::DIG | mv::FLY => {
-                if self.remove_volatile(p, v::TWOTURNMOVE) {
-                    self.remove_volatile(p, v::INVULNERABILITY);
+                if self.remove_volatile(p, v::TWOTURNMOVE, s) {
+                    self.remove_volatile(p, v::INVULNERABILITY, s);
                 } else {
-                    self.add_volatile(p, v::TWOTURNMOVE, target, m.id);
+                    plog!(s, |l| {
+                        let i = self.ident(l, p);
+                        l.add(format!("|-prepare|{i}|{}", move_name(m.id)));
+                    });
+                    self.add_volatile(p, v::TWOTURNMOVE, target, m.id, s);
                     if matches!(m.id, mv::DIG | mv::FLY) {
-                        self.add_volatile(p, v::INVULNERABILITY, target, m.id);
+                        self.add_volatile(p, v::INVULNERABILITY, target, m.id, s);
                     }
                     return;
                 }
             }
             mv::BIND | mv::WRAP | mv::CLAMP | mv::FIRESPIN => {
                 if self.sides[target].active.has(v::MUSTRECHARGE) {
-                    self.remove_volatile(target, v::MUSTRECHARGE);
+                    plog!(s, |l| l.hint("In Gen 1, partial trapping moves negate the recharge turn of Hyper Beam, even if they miss.", true, None));
+                    self.remove_volatile(target, v::MUSTRECHARGE, s);
                 }
             }
             _ => {}
         }
         if self.sides[target].mon().fainted() {
+            plog!(s, |l| {
+                l.attr_last_move("[notarget]");
+                l.add("|-notarget".into());
+            });
             return;
         }
         if MOVE_FLAGS[m.id as usize] & F_SKIP_LASTDAMAGE == 0 {
@@ -457,11 +529,12 @@ impl Battle {
         let damage = self.try_move_hit(target, p, m, s);
         // Disable and Self-Destruct/Explosion build Rage even when they miss or fail.
         if self.sides[target].active.boosts[0] < 6 && (m.d.selfdestruct || m.id == mv::DISABLE) && self.sides[target].active.has(v::RAGE) {
-            self.boost([1, 0, 0, 0, 0, 0, 0], target, Some(p), None);
+            self.boost([1, 0, 0, 0, 0, 0, 0], target, Some(p), None, s);
+            plog!(s, |l| l.hint(&format!("In Gen 1, using {} causes the target to build Rage, even if it misses or fails", move_name(m.id)), true, None));
         }
         if damage == R::False {
             if matches!(m.id, mv::JUMPKICK | mv::HIGHJUMPKICK) {
-                self.direct_damage(1, p, true);
+                self.direct_damage(1, p, Direct::Crash, s);
             }
         }
     }
@@ -476,15 +549,22 @@ impl Battle {
                 a.lockedmove_time -= 1;
                 if a.lockedmove_time == 0 {
                     self.del_vol(p, v::CONFUSION);
-                    self.add_volatile(p, v::CONFUSION, p, 0);
+                    self.add_volatile(p, v::CONFUSION, p, 0, s);
                 }
             } else {
-                self.add_volatile(p, v::LOCKEDMOVE, p, m.id);
+                self.add_volatile(p, v::LOCKEDMOVE, p, m.id, s);
             }
         }
         // Invulnerability (Dig/Fly).
         if self.sides[t].active.has(v::INVULNERABILITY) && t != p && !matches!(m.id, mv::SWIFT | mv::TRANSFORM) {
             s.event(Event::Miss { player: p });
+            plog!(s, |l| {
+                let name = self.mon_name(l, t, self.sides[t].active_slot()).to_string();
+                l.add(format!("|-message|The foe {name} can't be hit while invulnerable!"));
+                l.attr_last_move("[miss]");
+                let i = self.ident(l, p);
+                l.add(format!("|-miss|{i}"));
+            });
             if m.d.selfdestruct {
                 self.faint(p);
             }
@@ -492,6 +572,10 @@ impl Battle {
         }
         if !m.d.ignore_immunity && self.type_immune(m.d.type_, t) {
             s.event(Event::Immune);
+            plog!(s, |l| {
+                let i = self.ident(l, t);
+                l.add(format!("|-immune|{i}"));
+            });
             if m.d.selfdestruct {
                 self.faint(p);
             }
@@ -505,6 +589,10 @@ impl Battle {
         };
         if immune {
             s.event(Event::Immune);
+            plog!(s, |l| {
+                let i = self.ident(l, t);
+                l.add(format!("|-immune|{i}"));
+            });
             return R::False;
         }
         let mut accuracy = m.accuracy;
@@ -513,6 +601,10 @@ impl Battle {
         }
         if m.d.ohko && self.sides[t].active.modified[4] > self.sides[p].active.modified[4] {
             s.event(Event::Immune);
+            plog!(s, |l| {
+                let i = self.ident(l, t);
+                l.add(format!("|-immune|{i}|[ohko]"));
+            });
             return R::False;
         }
         let mut acc_int: Option<i64> = None;
@@ -553,6 +645,14 @@ impl Battle {
         if let Some(a) = acc_int {
             if !self.rng.chance(a as u32, 256, "tryMoveHit.accuracy") {
                 s.event(Event::Miss { player: p });
+                plog!(s, |l| {
+                    l.attr_last_move("[miss]");
+                    let i = self.ident(l, p);
+                    l.add(format!("|-miss|{i}"));
+                    if a == 255 {
+                        l.hint("In Gen 1, moves with 100% accuracy can still miss 1/256 of the time.", false, None);
+                    }
+                });
                 damage = R::False;
                 self.last_damage = 0;
             }
@@ -590,22 +690,33 @@ impl Battle {
                 if i == 0 {
                     return R::N(1);
                 }
+                plog!(s, |l| {
+                    let id = self.ident(l, t);
+                    l.add(format!("|-hitcount|{id}|{i}"));
+                });
             } else {
                 damage = self.move_hit(Some(t), p, m, Md::Main, false, false, s);
             }
         }
-        if m.d.selfdestruct && !self.sides[t].mon().sub_fainted() {
-            self.faint(p);
+        if m.d.selfdestruct {
+            if !self.sides[t].mon().sub_fainted() {
+                self.faint(p);
+            } else {
+                plog!(s, |l| l.hint(&format!("In Gen 1, the user of {} will not take damage if it breaks a Substitute.", move_name(m.id)), false, None));
+            }
         }
         if damage == R::False {
             self.del_vol(p, v::PARTIALTRAPPINGLOCK);
             return R::False;
         }
+        if m.d.ohko {
+            plog!(s, |l| l.add("|-ohko".into()));
+        }
         // AfterMoveSecondary: a burning move thaws a frozen target.
         if self.sides[t].mon().status == st::FRZ {
             if let Some(sec) = m.d.secondary {
                 if sec.status == st::BRN {
-                    self.cure_status(t);
+                    self.cure_status(t, false, s);
                 }
             }
         }
@@ -627,6 +738,7 @@ impl Battle {
                 if !r.truthy() {
                     if r == R::False {
                         s.event(Event::Fail);
+                        self.log_fail(t, s);
                     }
                     return R::False;
                 }
@@ -639,6 +751,7 @@ impl Battle {
                 if !hit.truthy() {
                     if hit == R::False {
                         s.event(Event::Fail);
+                        self.log_fail(t, s);
                     }
                     if hit != R::N(0) {
                         return R::False;
@@ -661,9 +774,9 @@ impl Battle {
             }
             if let R::N(d) = damage {
                 if !self.sides[t].mon().fainted() {
-                    let dealt = self.damage(d, t, Some(p), Dmg::Move(m.real_id()));
+                    let dealt = self.damage(d, t, Some(p), Dmg::Move(m.real_id()), s);
                     if dealt > 0 {
-                        self.apply_recoil(dealt, m.real_id(), p);
+                        self.apply_recoil(dealt, m.real_id(), p, s);
                     }
                     damage = R::N(dealt);
                     did_something = true;
@@ -682,9 +795,10 @@ impl Battle {
                 Md::Fixed(_) => ([0; 7], 0, 0),
             };
             if boosts != [0; 7] && self.sides[t].mon().hp > 0 {
-                let will = self.boost(boosts, t, Some(p), Some(!m.is_status()));
+                let will = self.boost(boosts, t, Some(p), Some(!m.is_status()), s);
                 if !will {
                     s.event(Event::Fail);
+                    self.log_fail(t, s);
                     return R::False;
                 }
                 did_something = true;
@@ -703,11 +817,12 @@ impl Battle {
             }
             if status != 0 {
                 if status == st::SLP && self.sides[t].active.has(v::MUSTRECHARGE) {
-                    if self.set_status(t, st::SLP, p, false, md == Md::Main, s) {
-                        self.remove_volatile(t, v::MUSTRECHARGE);
+                    if self.set_status(t, st::SLP, p, false, md == Md::Main, m.real_id(), s) {
+                        self.remove_volatile(t, v::MUSTRECHARGE, s);
+                        plog!(s, |l| l.hint("In Gen 1, if a Pokémon that has just used Hyper Beam and has yet to recharge is targeted with a sleep inducing move, any other status it may already have will be ignored and sleep will be induced regardless.", false, None));
                     }
                 } else if self.sides[t].mon().status == st::NONE {
-                    if self.set_status(t, status, p, false, md == Md::Main, s) {
+                    if self.set_status(t, status, p, false, md == Md::Main, m.real_id(), s) {
                         let a = &mut self.sides[t].active;
                         if status == st::BRN {
                             a.modified[0] = crate::battle::modify_stat(a.modified[0], 0.5);
@@ -718,12 +833,21 @@ impl Battle {
                     }
                 } else if !is_secondary {
                     s.event(Event::Fail);
+                    plog!(s, |l| {
+                        let i = self.ident(l, t);
+                        let cur = self.sides[t].mon().status;
+                        if cur == status {
+                            l.add(format!("|-fail|{i}|{}", data::status::IDS[status as usize]));
+                        } else {
+                            l.add(format!("|-fail|{i}"));
+                        }
+                    });
                 }
                 did_something = true;
             }
             if volatile != 0 {
                 let vid = data_vol(volatile);
-                if self.add_volatile(t, vid, p, m.real_id()) == Some(true) {
+                if self.add_volatile(t, vid, p, m.real_id(), s) == Some(true) {
                     did_something = true;
                     if vid == v::DISABLE {
                         let a = &self.sides[t].active;
@@ -737,11 +861,12 @@ impl Battle {
             if !is_self && !is_secondary && self.sides[t].active.has(v::RAGE) {
                 let a = &self.sides[t].active;
                 if a.boosts[0] < 6 && !m.is_status() && !m.d.selfdestruct {
-                    self.boost([1, 0, 0, 0, 0, 0, 0], t, Some(p), None);
+                    self.boost([1, 0, 0, 0, 0, 0, 0], t, Some(p), None, s);
                 }
             }
             if !hit_result && !did_something {
                 s.event(Event::Fail);
+                self.log_fail(t, s);
                 return R::False;
             }
         }
@@ -803,13 +928,25 @@ impl Battle {
                 // `-fail` from moveHit.
                 if self.sides[t].active.has(v::SUBSTITUTE) {
                     s.event(Event::Fail);
+                    plog!(s, |l| {
+                        let i = self.ident(l, t);
+                        l.add(format!("|-fail|{i}|move: Substitute"));
+                    });
                     return R::Null;
                 }
                 let m = self.sides[t].mon();
                 if (m.hp as f64) < m.stats[0] as f64 / 4.0 {
                     s.event(Event::Fail);
+                    plog!(s, |l| {
+                        let i = self.ident(l, t);
+                        l.add(format!("|-fail|{i}|move: Substitute|[weak]"));
+                    });
                     return R::Null;
                 }
+                R::Undef
+            }
+            mv::SPLASH => {
+                plog!(s, |l| l.add("|-nothing".into()));
                 R::Undef
             }
             _ => R::Undef,
@@ -836,23 +973,29 @@ impl Battle {
         let a = &mut self.sides[t].active;
         a.sub_hp -= if u as i64 > a.sub_hp as i64 { a.sub_hp } else { u as i32 };
         if a.sub_hp <= 0 {
-            self.remove_volatile(t, v::SUBSTITUTE);
+            self.remove_volatile(t, v::SUBSTITUTE, s);
             self.sides[t].mon_mut().set_sub_fainted(true);
+        } else {
+            plog!(s, |l| {
+                let i = self.ident(l, t);
+                l.add(format!("|-activate|{i}|Substitute|[damage]"));
+            });
         }
         if self.sides[t].active.has(v::SUBSTITUTE) {
             if u > 0 {
-                self.apply_recoil(u, m.real_id(), p);
+                self.apply_recoil(u, m.real_id(), p, s);
             }
             if m.d.drain {
                 let amount = (u / 2).max(1);
                 self.last_damage = amount;
-                self.heal(amount, p);
+                self.heal(amount, p, Heal::Drain(t), s);
             }
             if let Some(sec) = m.d.secondary {
                 if sec.volatile == data::vol::CONFUSION {
                     let ok = sec.chance == 0 || self.rng.chance((sec.chance as u32 * 256).div_ceil(100) - 1, 256, "substitute.confusion");
                     if ok {
-                        self.add_volatile(t, v::CONFUSION, p, m.real_id());
+                        self.add_volatile(t, v::CONFUSION, p, m.real_id(), s);
+                        plog!(s, |l| l.hint("In Gen 1, moves that inflict confusion as a secondary effect can confuse targets with a Substitute, as long as the move does not break the Substitute.", false, None));
                     }
                 }
             }
@@ -885,6 +1028,7 @@ impl Battle {
             mv::PSYWAVE => {
                 let lvl = self.sides[p].mon().level as u32;
                 if ((lvl + (lvl >> 1)) & 0xff) < 2 {
+                    plog!(s, |l| l.hint("In Gen 1, if a Pokémon at level 0, 1 or 171 uses Psywave, the game softlocks.", false, None));
                     return R::False;
                 }
                 let hi = (1.5 * lvl as f64) as u32;
@@ -944,14 +1088,22 @@ impl Battle {
         if crit {
             level *= 2;
             s.event(Event::Crit);
+            plog!(s, |l| {
+                let i = self.ident(l, t);
+                l.add(format!("|-crit|{i}"));
+            });
             attack = self.sides[p].mon().stats[ai + 1] as u64;
             defense = self.sides[t].mon().stats[di + 1] as u64;
         }
         level %= 256;
         if attack >= 256 || defense >= 256 {
+            if attack >= 1024 || defense >= 1024 {
+                plog!(s, |l| l.hint("In Gen 1, a stat will roll over to a small number if it is larger than 1024.", false, None));
+            }
             attack = ((attack / 4) % 256).max(1);
             defense = (defense / 4) % 256;
             if defense == 0 {
+                plog!(s, |l| l.hint("Pokemon Showdown avoids division by zero by rounding defense up to 1. In game, the battle would have crashed.", false, None));
                 defense = 1;
             }
         }
@@ -982,8 +1134,16 @@ impl Battle {
         }
         if total > 0 {
             s.event(Event::SuperEffective);
+            plog!(s, |l| {
+                let i = self.ident(l, t);
+                l.add(format!("|-supereffective|{i}"));
+            });
         } else if total < 0 {
             s.event(Event::Resisted);
+            plog!(s, |l| {
+                let i = self.ident(l, t);
+                l.add(format!("|-resisted|{i}"));
+            });
         }
         if d == 0 {
             return R::N(0);
@@ -995,22 +1155,58 @@ impl Battle {
     }
 
     /// Gen 1 Counter `damageCallback` (with Desync Clause Mod semantics).
-    fn counter_damage<S: Sink>(&mut self, _p: Player, t: Player, s: &mut S) -> R {
+    fn counter_damage<S: Sink>(&mut self, p: Player, t: Player, s: &mut S) -> R {
         let foe = &self.sides[t];
-        let selected_ok = foe.last_enemy_selected_move != mv::COUNTER;
-        let last = foe.last_enemy_move;
-        let counterable = if last == 0 || last >= 166 {
-            false
-        } else {
-            let d = &MOVES[last as usize];
-            (d.type_ == TYPE_NORMAL || d.type_ == TYPE_FIGHTING) && d.base_power > 0
+        let counterable = |last: u8| {
+            if last == 0 || last >= 166 {
+                false
+            } else {
+                let d = &MOVES[last as usize];
+                (d.type_ == TYPE_NORMAL || d.type_ == TYPE_FIGHTING) && d.base_power > 0
+            }
         };
-        if selected_ok && counterable && self.last_damage > 0 {
+        let enemy_sel_ok = foe.last_enemy_selected_move != mv::COUNTER;
+        let enemy_move_ok = counterable(foe.last_enemy_move);
+        let sel_ok = foe.last_selected_move != mv::COUNTER;
+        let move_ok = counterable(foe.last_move);
+        let dmg_ok = self.last_damage > 0;
+        const DESYNC: &str = "Desync Clause Mod activated!";
+        const ANNOUNCED: &str = "In Gen 1, from the Counter user's perspective, Counter uses the last announced move by the target's team to determine if it will succeed.";
+        if enemy_sel_ok && enemy_move_ok && dmg_ok {
+            if sel_ok && !move_ok {
+                plog!(s, |l| {
+                    l.hint(DESYNC, false, Some(t));
+                    l.hint(ANNOUNCED, false, Some(t));
+                });
+            }
             R::N(2 * self.last_damage)
         } else {
+            plog!(s, |l| {
+                if dmg_ok {
+                    if !enemy_sel_ok && sel_ok {
+                        if enemy_move_ok {
+                            l.hint(DESYNC, false, None);
+                            l.hint("In Gen 1, if Counter is used against a target that switched in and spent the turn sleeping, from the Counter user's perspective, it will fail if the move in the target's first slot is also Counter.", false, None);
+                        }
+                    } else if !enemy_move_ok && move_ok {
+                        l.hint(DESYNC, false, Some(t));
+                        l.hint(ANNOUNCED, false, Some(t));
+                    }
+                }
+                let i = self.ident(l, p);
+                l.add(format!("|-fail|{i}"));
+            });
             s.event(Event::Fail);
             R::False
         }
+    }
+
+    /// `this.add('-fail', target)`.
+    fn log_fail<S: Sink>(&self, t: Player, s: &mut S) {
+        plog!(s, |l| {
+            let i = self.ident(l, t);
+            l.add(format!("|-fail|{i}"));
+        });
     }
 
     // ---- Move callbacks (onHit) ---------------------------------------------------------------
@@ -1020,10 +1216,24 @@ impl Battle {
         match m.id {
             mv::CONVERSION => {
                 self.sides[p].active.types = self.sides[t].active.types;
+                plog!(s, |l| {
+                    let ty = self.sides[p].active.types;
+                    let names = if ty[0] == ty[1] {
+                        data::TYPE_NAMES[ty[0] as usize].to_string()
+                    } else {
+                        format!("{}/{}", data::TYPE_NAMES[ty[0] as usize], data::TYPE_NAMES[ty[1] as usize])
+                    };
+                    let (src, tgt) = (self.ident(l, p), self.ident(l, t));
+                    l.add(format!("|-start|{src}|typechange|{names}|[from] move: Conversion|[of] {tgt}"));
+                });
+                true
+            }
+            mv::PAYDAY => {
+                plog!(s, |l| l.add("|-fieldactivate|move: Pay Day".into()));
                 true
             }
             mv::HAZE => {
-                self.haze(p, s);
+                self.haze(p, t, s);
                 true
             }
             mv::MIMIC => {
@@ -1042,6 +1252,10 @@ impl Battle {
                 sd.active.set_virt(i, true);
                 sd.active.vslots[i] = MoveSlot::new(id, pp);
                 s.event(Event::MimicStart { player: p, mv: id });
+                plog!(s, |l| {
+                    let i = self.ident(l, p);
+                    l.add(format!("|-start|{i}|Mimic|{}", move_name(id)));
+                });
                 true
             }
             mv::MIRRORMOVE => {
@@ -1070,18 +1284,19 @@ impl Battle {
                     return false;
                 }
                 if (hp == max - 255 || hp == max - 511) && hp % 256 != 0 {
+                    plog!(s, |l| l.hint("In Gen 1, recovery moves fail if (user's maximum HP - user's current HP + 1) is divisible by 256, unless the current hp is also divisible by 256.", false, None));
                     return false;
                 }
                 if m.id == mv::REST {
-                    if !self.set_status(p, st::SLP, p, false, false, s) {
+                    if !self.set_status(p, st::SLP, p, false, false, mv::REST, s) {
                         return false;
                     }
                     let mm = self.sides[p].mon_mut();
                     mm.slp_time = 2;
                     mm.slp_start = 2;
-                    self.heal(max as u32, p);
+                    self.heal(max as u32, p, Heal::Silent, s);
                 } else {
-                    self.heal((max / 2) as u32, p);
+                    self.heal((max / 2) as u32, p, Heal::Move, s);
                 }
                 true
             }
@@ -1089,7 +1304,7 @@ impl Battle {
             mv::SUBSTITUTE => {
                 let max = self.sides[p].mon().stats[0];
                 if max > 3 {
-                    self.direct_damage((max / 4) as u32, p, false);
+                    self.direct_damage((max / 4) as u32, p, Direct::Plain, s);
                 }
                 true
             }
@@ -1098,7 +1313,12 @@ impl Battle {
     }
 
     /// Gen 1 Haze `onHit`.
-    fn haze<S: Sink>(&mut self, source: Player, _s: &mut S) {
+    fn haze<S: Sink>(&mut self, source: Player, target: Player, s: &mut S) {
+        plog!(s, |l| {
+            let i = self.ident(l, target);
+            l.add(format!("|-activate|{i}|move: Haze"));
+            l.add("|-clearallboost|[silent]".into());
+        });
         for p in 0..2 {
             if self.sides[p].active.species == 0 || self.sides[p].mon().fainted() {
                 continue;
@@ -1112,14 +1332,34 @@ impl Battle {
                         self.change_action(p, pm::CANNOTMOVE);
                     }
                 }
-                self.cure_status(p);
+                self.cure_status(p, true, s);
             }
             if self.sides[p].mon().status == st::TOX {
-                self.set_status(p, st::PSN, source, true, false, _s);
+                self.set_status(p, st::PSN, source, true, false, 0, s);
             }
             self.update_speed_one(p);
             for vid in [v::DISABLE, v::CONFUSION, v::MIST, v::FOCUSENERGY, v::LEECHSEED, v::LIGHTSCREEN, v::REFLECT, v::RESIDUALDMG] {
-                self.remove_volatile(p, vid);
+                if !self.remove_volatile(p, vid, s) {
+                    continue;
+                }
+                plog!(s, |l| {
+                    let name = match vid {
+                        v::MIST => "Mist",
+                        v::FOCUSENERGY => "move: Focus Energy",
+                        v::LEECHSEED => "move: Leech Seed",
+                        v::LIGHTSCREEN => "Light Screen",
+                        v::REFLECT => "Reflect",
+                        v::RESIDUALDMG => "Toxic counter",
+                        _ => "",
+                    };
+                    if name.is_empty() {
+                        // Disable/confusion printed their own `-end`: silence it.
+                        l.append_last("|[silent]");
+                    } else {
+                        let i = self.ident(l, p);
+                        l.add(format!("|-end|{i}|{name}|[silent]"));
+                    }
+                });
             }
         }
     }
@@ -1156,6 +1396,10 @@ impl Battle {
         }
         a.boosts = foe.boosts;
         s.event(Event::Transform { player: p });
+        plog!(s, |l| {
+            let (i, j) = (self.ident(l, p), self.ident(l, t));
+            l.add(format!("|-transform|{i}|{j}"));
+        });
         true
     }
 }

@@ -64,6 +64,12 @@ pub struct Spec {
     /// Showdown `patch` (to measure where the two references differ). Ignored by the runner.
     #[serde(default, rename = "simCompat", skip_serializing_if = "Option::is_none")]
     pub sim_compat: Option<String>,
+    /// Ask the runner for the exact protocol output (`parity fuzz --proto`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub proto: bool,
+    /// Player names (default "p1", "p2").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub names: Option<[String; 2]>,
 }
 
 fn vanilla() -> String {
@@ -407,5 +413,7 @@ pub fn random_spec(id: String, rng: &mut Rng, kind: TeamKind, format: &str, patc
         choice_seed: rng.next_u64() as u32,
         max_steps: None,
         sim_compat: None,
+        proto: false,
+        names: None,
     }
 }

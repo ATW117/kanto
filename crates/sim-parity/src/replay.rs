@@ -18,6 +18,12 @@ pub struct Step {
     #[serde(default)]
     pub rng: Vec<(String, u32, u32, u32)>,
     pub state: Value,
+    /// Protocol mode: the `[type, data]` messages Showdown sent for this step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proto: Option<Vec<(String, String)>>,
+    /// Protocol mode: per update, `extractChannelMessages` for channels -1, 0, 1, 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub views: Option<Vec<[String; 4]>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -46,6 +52,8 @@ pub enum Kind {
     /// The public event stream the env's reveal memory consumes (moves used with `[from]`,
     /// switches, `cant` reasons) differs from Showdown's protocol log.
     Events,
+    /// Protocol mode: the protocol text (log, a player's view, or a `|request|`) differs.
+    Proto,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -137,6 +145,12 @@ pub fn replay(spec: &Spec, trace: &Trace) -> Replay {
             }))
         }
     };
+    let names = spec.names.clone().unwrap_or_else(|| ["p1".to_string(), "p2".to_string()]);
+    let mut sink = sim_core::ProtoSink { log: sim_core::Log::new(&names[0], &names[1]), events: Vec::new() };
+    let mut sent = 0usize;
+    if spec.proto {
+        b.write_header(&mut sink.log);
+    }
     trace::start();
     let diverge = |b: &Battle, step: usize, kind: Kind, category: String, details: String, st: &Step| {
         Replay::Diverged(Box::new(Divergence {
@@ -164,11 +178,16 @@ pub fn replay(spec: &Spec, trace: &Trace) -> Replay {
         }
         let c = [Choice::parse(&st.choices[0]).unwrap_or_default(), Choice::parse(&st.choices[1]).unwrap_or_default()];
         let mut nb = b;
-        let mut events: Vec<sim_core::Event> = Vec::new();
+        sink.events.clear();
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            nb.apply_choices_unchecked(c[0], c[1], &mut events);
+            if spec.proto {
+                nb.apply_choices_unchecked(c[0], c[1], &mut sink);
+            } else {
+                nb.apply_choices_unchecked(c[0], c[1], &mut sink.events);
+            }
             nb
         }));
+        let events = std::mem::take(&mut sink.events);
         match res {
             Ok(x) => b = x,
             Err(e) => {
@@ -214,9 +233,25 @@ pub fn replay(spec: &Spec, trace: &Trace) -> Replay {
             trace::stop();
             return diverge(&b, i, Kind::Events, cat, d, st);
         }
+        if spec.proto {
+            let update = sink.log.lines[sent..].to_vec();
+            sent = sink.log.lines.len();
+            if let Some(d) = check_proto(&b, &sink.log, &update, st) {
+                trace::stop();
+                let cat = d.0.clone();
+                return diverge(&b, i, Kind::Proto, cat, format!("choices {:?}\n{}", st.choices, d.1), st);
+            }
+        }
         let ours = snapshot(&b);
         let mut diffs = Vec::new();
-        diff(&st.state, &ours, &mut String::new(), &mut diffs);
+        // Showdown's `winner` is the side's name; the snapshot uses "p1"/"p2".
+        let mut sd_state = std::borrow::Cow::Borrowed(&st.state);
+        if let Some(w) = st.state["winner"].as_str() {
+            if let Some(k) = names.iter().position(|n| n == w) {
+                sd_state.to_mut()["winner"] = Value::String(format!("p{}", k + 1));
+            }
+        }
+        diff(&sd_state, &ours, &mut String::new(), &mut diffs);
         if !diffs.is_empty() {
             let cat = format!("state: {}", normalize_path(&diffs[0].0));
             let mut d = format!("choices {:?}\n", st.choices);
@@ -230,6 +265,79 @@ pub fn replay(spec: &Spec, trace: &Trace) -> Replay {
     }
     trace::stop();
     Replay::Match { steps: trace.steps.len() }
+}
+
+// ---- Protocol check ------------------------------------------------------------------------------
+
+/// A protocol line's template for categories: the message kind plus its `[tags]`.
+fn line_kind(l: &str) -> String {
+    let parts: Vec<&str> = l.split('|').collect();
+    let mut k = parts.get(1).copied().unwrap_or("").to_string();
+    if matches!(k.as_str(), "-start" | "-end" | "-activate" | "cant" | "-fail" | "-hint" | "-message") {
+        if let Some(x) = parts.get(3) {
+            k.push(' ');
+            k.push_str(&x.chars().take(24).collect::<String>());
+        }
+    }
+    for p in parts.iter().skip(2) {
+        if p.starts_with('[') {
+            k.push(' ');
+            k.push_str(p.split(']').next().unwrap_or(""));
+            k.push(']');
+        }
+    }
+    k
+}
+
+fn first_diff(kind: &str, a: &[String], b: &[String]) -> Option<(String, String)> {
+    let n = a.len().max(b.len());
+    for k in 0..n {
+        let (x, y) = (a.get(k), b.get(k));
+        if x != y {
+            let cat = format!("proto {kind}: showdown[{}] ours[{}]", x.map(|s| line_kind(s)).unwrap_or("-".into()), y.map(|s| line_kind(s)).unwrap_or("-".into()));
+            let mut d = format!("{kind}: first difference at line {k}\n");
+            for j in k.saturating_sub(4)..(k + 4).min(n) {
+                d.push_str(&format!("  {}{j:3} sd:   {}\n        ours: {}\n", if j == k { "*" } else { " " }, a.get(j).map(|s| s.as_str()).unwrap_or("-"), b.get(j).map(|s| s.as_str()).unwrap_or("-")));
+            }
+            return Some((cat, d));
+        }
+    }
+    None
+}
+
+/// Compare this step's protocol output with Showdown's: the raw update (with `|split|` blocks),
+/// each channel's view, and each player's `|request|` JSON.
+fn check_proto(b: &Battle, log: &sim_core::Log, update: &[String], st: &Step) -> Option<(String, String)> {
+    let msgs = st.proto.as_ref()?;
+    let norm = |l: &str| if l.starts_with("|t:|") { "|t:|0".to_string() } else { l.to_string() };
+    let sd_update: Vec<String> = msgs.iter().filter(|m| m.0 == "update").flat_map(|m| m.1.split('\n').map(norm).collect::<Vec<_>>()).collect();
+    let ours: Vec<String> = update.iter().map(|l| norm(l)).collect();
+    if let Some(d) = first_diff("log", &sd_update, &ours) {
+        return Some(d);
+    }
+    if let Some(views) = &st.views {
+        let names = ["omniscient", "spectator", "p1", "p2"];
+        for (c, name) in names.iter().enumerate() {
+            let sd: Vec<String> = views.iter().flat_map(|v| v[c].split('\n').filter(|x| !x.is_empty()).map(norm).collect::<Vec<_>>()).collect();
+            let o: Vec<String> = sim_core::proto::extract_channel(&ours, c as i32 - 1);
+            if let Some(d) = first_diff(&format!("view {name}"), &sd, &o) {
+                return Some(d);
+            }
+        }
+    }
+    for p in 0..2 {
+        let pre = format!("p{}\n|request|", p + 1);
+        let sd: Option<&str> = msgs.iter().filter(|m| m.0 == "sideupdate").find_map(|m| m.1.strip_prefix(&pre));
+        let o = b.request_json(log, p);
+        if sd != o.as_deref() {
+            let (a, c) = (sd.unwrap_or("-"), o.as_deref().unwrap_or("-"));
+            let k = a.bytes().zip(c.bytes()).position(|(x, y)| x != y).unwrap_or(a.len().min(c.len()));
+            let ctx = |s: &str| s.get(k.saturating_sub(60)..(k + 100).min(s.len())).unwrap_or(s).to_string();
+            let cat = format!("proto request p{}: {}", p + 1, if sd.is_none() || o.is_none() { "presence" } else { "json" });
+            return Some((cat, format!("p{} request differs at byte {k}\n  sd:   ...{}\n  ours: ...{}\nfull sd:   {a}\nfull ours: {c}\n", p + 1, ctx(a), ctx(c))));
+        }
+    }
+    None
 }
 
 // ---- Compact regression corpus ------------------------------------------------------------------
@@ -267,6 +375,36 @@ fn encode_legal(l: &[String]) -> String {
 pub struct Compact {
     pub spec: Spec,
     pub steps: Vec<String>,
+    /// Protocol corpora: per step, a hash of Showdown's protocol output (the update lines with
+    /// `|t:|` normalised, then each player's `|request|` JSON); see [`proto_hash`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proto: Option<Vec<String>>,
+}
+
+/// Hash of one step's protocol output: update lines (`|t:|` normalised) and both requests.
+/// The per-channel views are a pure function of the update lines ([`sim_core::proto::extract_channel`]).
+pub fn proto_hash(update: &[String], requests: [Option<&str>; 2]) -> String {
+    let mut h = 0xcbf29ce484222325u64;
+    for l in update {
+        let l = if l.starts_with("|t:|") { "|t:|0" } else { l.as_str() };
+        h = fnv(h, l.as_bytes());
+        h = fnv(h, b"\n");
+    }
+    for r in requests {
+        h = fnv(h, b"\x00");
+        h = fnv(h, r.unwrap_or("-").as_bytes());
+    }
+    format!("{h:016x}")
+}
+
+fn sd_proto_hash(st: &Step) -> Option<String> {
+    let msgs = st.proto.as_ref()?;
+    let update: Vec<String> = msgs.iter().filter(|m| m.0 == "update").flat_map(|m| m.1.split('\n').map(String::from).collect::<Vec<_>>()).collect();
+    let req = |p: usize| {
+        let pre = format!("p{}\n|request|", p + 1);
+        msgs.iter().filter(|m| m.0 == "sideupdate").find_map(|m| m.1.strip_prefix(&pre))
+    };
+    Some(proto_hash(&update, [req(0), req(1)]))
 }
 
 impl Compact {
@@ -277,13 +415,20 @@ impl Compact {
             .collect();
         let mut spec = spec.clone();
         spec.choices = Some(trace.steps[1..upto].iter().map(|s| s.choices.clone()).collect());
-        Compact { spec, steps }
+        let proto = trace.steps[..upto].iter().map(sd_proto_hash).collect::<Option<Vec<String>>>();
+        Compact { spec, steps, proto }
     }
 
     /// Replay; `Err((step, what))` at the first mismatch.
     pub fn check(&self) -> Result<(), (usize, String)> {
         let mut b = self.spec.battle().map_err(|e| (0, e))?;
         let choices = self.spec.choices.clone().unwrap_or_default();
+        let names = self.spec.names.clone().unwrap_or_else(|| ["p1".to_string(), "p2".to_string()]);
+        let mut sink = sim_core::ProtoSink { log: sim_core::Log::new(&names[0], &names[1]), events: Vec::new() };
+        if self.proto.is_some() {
+            b.write_header(&mut sink.log);
+        }
+        let mut sent = 0;
         for (i, st) in self.steps.iter().enumerate() {
             let parts: Vec<&str> = st.split(',').collect();
             if parts.len() != 3 {
@@ -298,8 +443,24 @@ impl Compact {
                 }
             }
             let c = if i == 0 { [String::new(), String::new()] } else { choices[i - 1].clone() };
-            b.apply_choices_unchecked(Choice::parse(&c[0]).unwrap_or_default(), Choice::parse(&c[1]).unwrap_or_default(), &mut ());
-            if format!("{:016x}", state_hash(&snapshot(&b))) != parts[2] {
+            let (c1, c2) = (Choice::parse(&c[0]).unwrap_or_default(), Choice::parse(&c[1]).unwrap_or_default());
+            if let Some(hashes) = &self.proto {
+                b.apply_choices_unchecked(c1, c2, &mut sink);
+                let update = &sink.log.lines[sent..];
+                let h = proto_hash(update, [b.request_json(&sink.log, 0).as_deref(), b.request_json(&sink.log, 1).as_deref()]);
+                sent = sink.log.lines.len();
+                if hashes.get(i) != Some(&h) {
+                    return Err((i, format!("protocol output differs:\n{}", update.join("\n"))));
+                }
+            } else {
+                b.apply_choices_unchecked(c1, c2, &mut ());
+            }
+            let mut st = snapshot(&b);
+            // Showdown's `winner` is the side's name.
+            if let Some(k) = st["winner"].as_str().and_then(|w| ["p1", "p2"].iter().position(|x| *x == w)) {
+                st["winner"] = Value::String(names[k].clone());
+            }
+            if format!("{:016x}", state_hash(&st)) != parts[2] {
                 return Err((i, "state (or PRNG seed) differs".into()));
             }
         }

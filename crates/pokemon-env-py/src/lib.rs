@@ -6,6 +6,8 @@
 
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
+mod proto;
+
 use battle_env::backend::NUM_ACTIONS;
 use battle_env::env::EnvConfig;
 use battle_env::obs::{self, OBS_DIM, OBS_VERSION};
@@ -282,6 +284,8 @@ fn bench_engine(py: Python<'_>, battles: usize, threads: usize, teams: &str, see
 #[pymodule]
 fn _pokemon_env(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<VecEnv>()?;
+    m.add_class::<proto::ProtocolBattle>()?;
+    m.add_class::<proto::ProtocolTeams>()?;
     m.add("OBS_DIM", OBS_DIM)?;
     m.add("OBS_VERSION", OBS_VERSION)?;
     m.add("NUM_ACTIONS", NUM_ACTIONS)?;

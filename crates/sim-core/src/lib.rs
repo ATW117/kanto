@@ -7,10 +7,12 @@
 //!   per-generation crate (`sim-gen1`, ...) implements.
 
 pub mod prng;
+pub mod proto;
 pub mod sort;
 pub mod trace;
 
 pub use prng::Prng;
+pub use proto::{Log, ProtoSink};
 
 /// Player index: 0 = p1, 1 = p2.
 pub type Player = usize;
@@ -149,6 +151,12 @@ pub enum Event {
 /// Receives battle events. `()` ignores them (the fast path).
 pub trait Sink {
     fn event(&mut self, ev: Event);
+    /// The Showdown protocol log to write into, if this sink records one ([`ProtoSink`]). The
+    /// default returns `None`, so for the other sinks every protocol line compiles away.
+    #[inline(always)]
+    fn log(&mut self) -> Option<&mut Log> {
+        None
+    }
 }
 
 impl Sink for () {

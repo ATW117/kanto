@@ -5,6 +5,7 @@
 //! `Battle#turnLoop`, `run_action` = `Battle#runAction`, ...). Move execution lives in
 //! `moves.rs`, event-handler dispatch in `events.rs`.
 
+use crate::proto::plog;
 use crate::state::*;
 use sim_core::sort::speed_sort;
 use sim_core::{Choice, Event, Outcome, Player, Prng, Request, Sink};
@@ -196,9 +197,15 @@ impl Battle {
     pub fn start<S: Sink>(&mut self, s: &mut S) {
         self.started = true;
         self.mid_turn = true;
+        plog!(s, |l| {
+            l.add("|".into());
+            l.add(format!("|t:|{}", l.timestamp));
+        });
         for p in 0..2 {
             self.sides[p].left = self.sides[p].n;
+            plog!(s, |l| l.add(format!("|teamsize|p{}|{}", p + 1, self.sides[p].n)));
         }
+        plog!(s, |l| l.add("|start".into()));
         // runAction('start'): switch in both leads.
         for p in 0..2 {
             let lead = self.sides[p].order[0];
@@ -328,6 +335,10 @@ impl Battle {
         let n = self.queue.len as usize;
         speed_sort(&mut self.rng, &mut self.queue.list[..n], |a, b| a.key().cmp(&b.key()) as i64, "queue.sort");
         // turnLoop
+        plog!(s, |l| {
+            l.add("|".into());
+            l.add(format!("|t:|{}", l.timestamp));
+        });
         if !self.mid_turn {
             let bt = self.resolve_action(Action::new(ActionKind::BeforeTurn, 0, 0));
             self.insert_action(bt, None);
@@ -501,8 +512,12 @@ impl Battle {
             ActionKind::RunSwitch => self.run_switch(p, s),
             ActionKind::BeforeTurn => self.each_event("eachEvent:BeforeTurn"),
             ActionKind::Residual => {
+                plog!(s, |l| l.add("|".into()));
                 self.update_speed();
                 self.residual_event(s);
+                if !self.ended {
+                    plog!(s, |l| l.add("|upkeep".into()));
+                }
             }
         }
         self.action_tail(Some(a), s);
@@ -619,6 +634,7 @@ impl Battle {
         // The incoming Pokémon's volatile state is what its last clearVolatile left.
         self.init_active(p);
         s.event(Event::Switch { player: p, slot: incoming });
+        plog!(s, |l| self.add_switch(l, p));
         let _ = q;
         let rs = self.resolve_action(Action::new(ActionKind::RunSwitch, p as u8, incoming));
         self.insert_action(rs, Some(p));
@@ -682,6 +698,10 @@ impl Battle {
         // runEvent('SwitchIn'): Toxic reverts to regular poison.
         if self.sides[p].mon().status == st::TOX {
             self.sides[p].mon_mut().status = st::PSN;
+            plog!(s, |l| {
+                let i = self.ident(l, p);
+                l.add(format!("|-status|{i}|psn|[silent]"));
+            });
         }
         // Gen <= 2: lastMove is reset for every active Pokémon.
         for side in self.sides.iter_mut() {
@@ -758,6 +778,10 @@ impl Battle {
                 continue;
             }
             s.event(Event::Faint { player: p, slot: f.slot });
+            plog!(s, |l| {
+                let id = self.ident(l, p);
+                l.add(format!("|faint|{id}"));
+            });
             if self.sides[p].left > 0 {
                 self.sides[p].left -= 1;
             }
@@ -774,28 +798,37 @@ impl Battle {
         // Gen 1: fainting skips the rest of the turn.
         self.queue.clear();
         let _ = last;
-        self.check_win()
+        self.check_win(s)
     }
 
     /// `Battle#checkWin`.
-    fn check_win(&mut self) -> bool {
+    fn check_win<S: Sink>(&mut self, s: &mut S) -> bool {
         if self.sides[0].left == 0 && self.sides[1].left == 0 {
-            self.win(3);
+            self.win(3, s);
             return true;
         }
         for p in 0..2 {
             if self.sides[1 - p].left == 0 {
-                self.win(p as u8 + 1);
+                self.win(p as u8 + 1, s);
                 return true;
             }
         }
         false
     }
 
-    fn win(&mut self, w: u8) {
+    /// `Battle#win` (`w` = 1/2 for p1/p2, 3 for a tie).
+    fn win<S: Sink>(&mut self, w: u8, s: &mut S) {
         if self.ended {
             return;
         }
+        plog!(s, |l| {
+            l.add("|".into());
+            if w == 3 {
+                l.add("|tie".into());
+            } else {
+                l.add(format!("|win|{}", l.player_names[(w - 1) as usize]));
+            }
+        });
         self.winner = w;
         self.ended = true;
         for sd in self.sides.iter_mut() {
@@ -879,14 +912,24 @@ impl Battle {
         for sd in self.sides.iter_mut() {
             sd.fainted_this_turn = false;
         }
-        if self.endless_battle_check() {
+        if self.endless_battle_check(s) {
             return;
         }
-        if self.turn > 1000 {
-            self.win(3);
-            return;
+        if self.turn > 100 {
+            if self.turn > 1000 {
+                plog!(s, |l| l.add("|message|It is turn 1000. You have hit the turn limit!".into()));
+                self.win(3, s);
+                return;
+            }
+            let t = self.turn;
+            if (t >= 500 && t % 100 == 0) || (t >= 900 && t % 10 == 0) || t >= 990 {
+                let left = 1000 - t;
+                let text = if left == 1 { "1 turn".to_string() } else { format!("{left} turns") };
+                plog!(s, |l| l.add(format!("|bigerror|You will auto-tie if the battle doesn't end in {text} (on turn 1000).")));
+            }
         }
         s.event(Event::Turn { turn: self.turn });
+        plog!(s, |l| l.add(format!("|turn|{}", self.turn)));
         // makeRequest('move')
         for p in 0..2 {
             if self.sides[p].left > 0 {
@@ -899,7 +942,7 @@ impl Battle {
     }
 
     /// Gen 1 Endless Battle Clause check (`maybeTriggerEndlessBattleClause`).
-    fn endless_battle_check(&mut self) -> bool {
+    fn endless_battle_check<S: Sink>(&mut self, s: &mut S) -> bool {
         // (The foe-wide conditions are pure, so they are evaluated only when needed.)
         let stuck = (0..2).all(|p| {
             let q = 1 - p;
@@ -923,7 +966,8 @@ impl Battle {
             })
         });
         if stuck {
-            self.win(3);
+            plog!(s, |l| l.add("|-message|This battle cannot progress. Endless Battle Clause activated!".into()));
+            self.win(3, s);
         }
         stuck
     }

@@ -9,11 +9,13 @@
 mod battle;
 mod events;
 mod moves;
+pub mod proto;
 pub mod ser;
 pub mod state;
 
 pub use events::VolIter;
 pub use battle::{calc_pp, calc_stats, req, MonSpec, ReqMove, TeamError};
+pub use proto::{ProtocolBattle, StepOutput};
 pub use sim_core::{Choice, Event, IllegalChoice, Outcome, Player, Prng, Request, Sink};
 pub use state::{Battle, Compat, Rules};
 

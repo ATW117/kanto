@@ -4,19 +4,44 @@
 //! `speedSort`, so ties consume the PRNG exactly as in Showdown.
 
 use crate::battle::modify_stat;
+use crate::proto::{plog, BOOST_NAMES};
 use crate::state::*;
 use sim_core::sort::{key, sort_by_key, KEY_ORDER_UNSET};
 use sim_core::{Event, Player, Sink};
 use sim_data::gen1::{self as data};
 
-/// What caused damage (`effect` in `Battle#damage`); decides whether `lastDamage` is updated.
+/// What caused damage (`effect` in `Battle#damage`); decides whether `lastDamage` is updated
+/// and how the `-damage` line is tagged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Dmg {
     Move(u8),
     Recoil,
     LeechSeed,
-    /// Residual damage from a status (PSN/BRN/TOX).
+    /// Residual damage from a status (PSN/BRN/TOX): `[from] psn|brn`, plus `[of] source` when
+    /// the event source is another Pokémon.
     Status,
+}
+
+/// The effect of a `Battle#directDamage` (the `-damage` tag and Gen 1's Substitute quirk).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Direct {
+    /// Confusion self-hit: `[from] confusion`, hits Substitutes the Gen 1 way.
+    Confusion,
+    /// Jump Kick / Hi Jump Kick crash damage: untagged, hits Substitutes the Gen 1 way.
+    Crash,
+    /// Anything else (Substitute's HP cost): untagged.
+    Plain,
+}
+
+/// How a heal is reported (`Battle#heal`'s effect).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Heal {
+    /// A move's own heal (Recover, Soft-Boiled): untagged.
+    Move,
+    /// Drain: `[from] drain|[of] <the damaged Pokémon>`.
+    Drain(Player),
+    /// Rest, Leech Seed: `[silent]`.
+    Silent,
 }
 
 /// `Condition` handlers sort after `Status` ones at equal priority (`subOrder` 2 vs 0).
@@ -48,19 +73,31 @@ impl Battle {
         self.sides[p].active.vols &= !(1 << id);
     }
 
-    /// `Pokemon#removeVolatile`.
-    pub(crate) fn remove_volatile(&mut self, p: Player, id: u8) -> bool {
+    /// `Pokemon#removeVolatile` (with the Gen 1 `End` messages: confusion, Disable, Substitute).
+    pub(crate) fn remove_volatile<S: Sink>(&mut self, p: Player, id: u8, s: &mut S) -> bool {
         if self.sides[p].mon().hp == 0 || !self.sides[p].active.has(id) {
             return false;
         }
         self.del_vol(p, id);
+        let what = match id {
+            v::CONFUSION => "confusion",
+            v::DISABLE => "Disable",
+            v::SUBSTITUTE => "Substitute",
+            _ => "",
+        };
+        if !what.is_empty() {
+            plog!(s, |l| {
+                let i = self.ident(l, p);
+                l.add(format!("|-end|{i}|{what}"));
+            });
+        }
         true
     }
 
     /// `Pokemon#addVolatile(id, source, sourceEffect)`; `effect` is the move that caused it (for
     /// `effectState.move` and friends). Returns Showdown's result: `Some(true)` added/restarted,
     /// `Some(false)` failed, `None` a `null` result (Minimize/Defense Curl restart).
-    pub(crate) fn add_volatile(&mut self, p: Player, id: u8, source: Player, effect: u8) -> Option<bool> {
+    pub(crate) fn add_volatile<S: Sink>(&mut self, p: Player, id: u8, source: Player, effect: u8, s: &mut S) -> Option<bool> {
         let q = 1 - p;
         if self.sides[p].mon().hp == 0 {
             return Some(false);
@@ -80,6 +117,28 @@ impl Battle {
             return Some(false);
         }
         self.set_vol(p, id);
+        // onStart messages.
+        let start = match id {
+            v::CONFUSION if effect == 0 => "confusion|[silent]",
+            v::CONFUSION => "confusion",
+            v::LEECHSEED => "move: Leech Seed",
+            v::MIST => "Mist",
+            v::LIGHTSCREEN => "Light Screen",
+            v::REFLECT => "Reflect",
+            v::FOCUSENERGY => "move: Focus Energy",
+            v::BIDE => "Bide",
+            v::SUBSTITUTE => "Substitute",
+            _ => "",
+        };
+        if !start.is_empty() {
+            plog!(s, |l| {
+                let i = self.ident(l, p);
+                l.add(format!("|-start|{i}|{start}"));
+            });
+        }
+        if id == v::TWOTURNMOVE {
+            plog!(s, |l| l.attr_last_move("[still]"));
+        }
         match id {
             v::CONFUSION => {
                 let t = self.rng.random_range(2, 6, "confusion.onStart") as i8;
@@ -87,7 +146,7 @@ impl Battle {
             }
             v::FLINCH => {
                 self.sides[p].active.flinch_dur = 1;
-                self.remove_volatile(p, v::MUSTRECHARGE);
+                self.remove_volatile(p, v::MUSTRECHARGE, s);
             }
             v::PARTIALLYTRAPPED => {
                 let pt_source = self.sides[source].order[0];
@@ -115,7 +174,7 @@ impl Battle {
                 a.ptl_move = effect;
                 a.ptl_damage = last_damage;
                 a.ptl_locked = locked;
-                self.add_volatile(q, v::PARTIALLYTRAPPED, p, effect);
+                self.add_volatile(q, v::PARTIALLYTRAPPED, p, effect, s);
             }
             v::LOCKEDMOVE => {
                 let t = self.rng.random_range(2, 4, "lockedmove.onStart") as i8;
@@ -145,6 +204,10 @@ impl Battle {
                 let k = self.rng.sample(n as u32, "disable.onStart") as usize;
                 let slot = cand[k];
                 let mv = self.sides[p].slot(slot as usize).id;
+                plog!(s, |l| {
+                    let i = self.ident(l, p);
+                    l.add(format!("|-start|{i}|Disable|{}", crate::proto::move_name(mv)));
+                });
                 let t = self.rng.random_range(1, 9, "disable.onStart") as i8;
                 let a = &mut self.sides[p].active;
                 a.disable_move = mv;
@@ -154,6 +217,14 @@ impl Battle {
             v::SUBSTITUTE => {
                 let maxhp = self.sides[p].mon().stats[0];
                 self.sides[p].active.sub_hp = (maxhp / 4) as i32 + 1;
+                if self.sides[p].active.has(v::PARTIALLYTRAPPED) {
+                    // `-end|X|<trapping move>|[partiallytrapped]|[silent]`: the foe's move.
+                    let mv = self.sides[1 - p].active.ptl_move;
+                    plog!(s, |l| {
+                        let i = self.ident(l, p);
+                        l.add(format!("|-end|{i}|{}|[partiallytrapped]|[silent]", crate::proto::move_name(mv)));
+                    });
+                }
                 self.del_vol(p, v::PARTIALLYTRAPPED);
             }
             v::RAGE => self.sides[p].active.rage_acc = 255,
@@ -169,7 +240,9 @@ impl Battle {
     /// `status_move` says whether the source effect is a move with a `status` of its own (a
     /// status move such as Toxic, not a secondary effect): only then does Showdown print `-fail`
     /// (status already set) or `-immune` (Poison types vs poison).
-    pub(crate) fn set_status<S: Sink>(&mut self, p: Player, status: u8, source: Player, ignore_immunities: bool, status_move: bool, s: &mut S) -> bool {
+    /// `effect_move` is the source effect when it is a move (`[from] move: X` on sleep), else 0.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn set_status<S: Sink>(&mut self, p: Player, status: u8, source: Player, ignore_immunities: bool, status_move: bool, effect_move: u8, s: &mut S) -> bool {
         let sd = &self.sides[p];
         if sd.mon().hp == 0 {
             return false;
@@ -177,6 +250,10 @@ impl Battle {
         if sd.mon().status == status {
             if status_move {
                 s.event(Event::Fail);
+                plog!(s, |l| {
+                    let i = self.ident(l, p);
+                    l.add(format!("|-fail|{i}|{}", data::status::IDS[status as usize]));
+                });
             }
             return false;
         }
@@ -185,11 +262,15 @@ impl Battle {
             if immune {
                 if status_move {
                     s.event(Event::Immune);
+                    plog!(s, |l| {
+                        let i = self.ident(l, p);
+                        l.add(format!("|-immune|{i}"));
+                    });
                 }
                 return false;
             }
         }
-        if !self.set_status_event(p, status, source) {
+        if !self.set_status_event(p, status, source, s) {
             return false;
         }
         let self_inflicted = source == p;
@@ -198,6 +279,14 @@ impl Battle {
         m.set_status_self(self_inflicted);
         m.slp_time = 0;
         m.slp_start = 0;
+        plog!(s, |l| {
+            let i = self.ident(l, p);
+            if status == st::SLP && effect_move != 0 {
+                l.add(format!("|-status|{i}|slp|[from] move: {}", crate::proto::move_name(effect_move)));
+            } else {
+                l.add(format!("|-status|{i}|{}", data::status::IDS[status as usize]));
+            }
+        });
         match status {
             st::SLP => {
                 let t = self.rng.random_range(1, 8, "slp.onStart") as u8;
@@ -207,7 +296,7 @@ impl Battle {
             }
             st::TOX => {
                 if !self.sides[p].active.has(v::RESIDUALDMG) {
-                    self.add_volatile(p, v::RESIDUALDMG, p, 0);
+                    self.add_volatile(p, v::RESIDUALDMG, p, 0, s);
                 }
                 self.sides[p].active.residual_counter = 0;
             }
@@ -219,7 +308,7 @@ impl Battle {
     /// `runEvent('SetStatus')`: Sleep/Freeze Clause Mod handlers (field pseudo-weathers in
     /// 0.11.11). With both clauses their handlers tie on (priority 0, subOrder 5) in vanilla
     /// Showdown and get shuffled.
-    fn set_status_event(&mut self, p: Player, status: u8, source: Player) -> bool {
+    fn set_status_event<S: Sink>(&mut self, p: Player, status: u8, source: Player, s: &mut S) -> bool {
         let r = self.rules;
         if r.sleep_clause && r.freeze_clause && r.compat == Compat::Vanilla {
             let k = key(KEY_ORDER_UNSET, 0, 0, 5);
@@ -234,6 +323,10 @@ impl Battle {
             for i in 0..sd.n as usize {
                 let m = &sd.mons[i];
                 if m.hp > 0 && m.status == st::SLP && !m.status_self() {
+                    plog!(s, |l| {
+                        l.add("|-message|Sleep Clause Mod activated.".into());
+                        l.hint("Sleep Clause Mod prevents players from putting more than one of their opponent's Pokémon to sleep at a time", false, None);
+                    });
                     return false;
                 }
             }
@@ -241,6 +334,7 @@ impl Battle {
         if r.freeze_clause && status == st::FRZ {
             for i in 0..sd.n as usize {
                 if sd.mons[i].status == st::FRZ {
+                    plog!(s, |l| l.add("|-message|Freeze Clause activated.".into()));
                     return false;
                 }
             }
@@ -248,12 +342,19 @@ impl Battle {
         true
     }
 
-    /// `Pokemon#cureStatus`.
-    pub(crate) fn cure_status(&mut self, p: Player) -> bool {
-        let m = self.sides[p].mon_mut();
+    /// `Pokemon#cureStatus(silent)`.
+    pub(crate) fn cure_status<S: Sink>(&mut self, p: Player, silent: bool, s: &mut S) -> bool {
+        let m = self.sides[p].mon();
         if m.hp == 0 || m.status == st::NONE {
             return false;
         }
+        let old = m.status;
+        plog!(s, |l| {
+            let i = self.ident(l, p);
+            let tag = if silent { "[silent]" } else { "[msg]" };
+            l.add(format!("|-curestatus|{i}|{}|{tag}", data::status::IDS[(old as usize).min(6)]));
+        });
+        let m = self.sides[p].mon_mut();
         m.status = st::NONE;
         m.slp_time = 0;
         m.slp_start = 0;
@@ -281,7 +382,7 @@ impl Battle {
     }
 
     /// `Battle#damage` (`spreadDamage` for one target). Returns the damage dealt.
-    pub(crate) fn damage(&mut self, d: u32, p: Player, source: Option<Player>, effect: Dmg) -> u32 {
+    pub(crate) fn damage<S: Sink>(&mut self, d: u32, p: Player, source: Option<Player>, effect: Dmg, s: &mut S) -> u32 {
         if self.sides[p].mon().hp == 0 {
             return 0;
         }
@@ -290,13 +391,30 @@ impl Battle {
         if !matches!(effect, Dmg::Recoil | Dmg::LeechSeed | Dmg::Status) {
             self.last_damage = d;
         }
+        // (The status tag is read before the damage.)
+        let status = self.sides[p].mon().status;
         let dealt = self.mon_damage(p, d);
+        plog!(s, |l| {
+            let rest = match effect {
+                Dmg::Move(_) => String::new(),
+                Dmg::Recoil => "|[from] Recoil".into(),
+                Dmg::LeechSeed => format!("|[from] Leech Seed|[of] {}", self.ident(l, source.unwrap_or(1 - p))),
+                Dmg::Status => {
+                    let name = if status == st::BRN { "brn" } else { "psn" };
+                    match source {
+                        Some(src) if src != p => format!("|[from] {name}|[of] {}", self.ident(l, src)),
+                        _ => format!("|[from] {name}"),
+                    }
+                }
+            };
+            self.add_health(l, "-damage", p, &rest);
+        });
         if dealt != 0 {
             if let (Dmg::Move(m), Some(src)) = (effect, source) {
                 if data::MOVES[m as usize].drain {
                     let amount = (dealt / 2).max(1);
                     self.last_damage = amount;
-                    self.heal(amount, src);
+                    self.heal(amount, src, Heal::Drain(p), s);
                 }
             }
         }
@@ -304,31 +422,41 @@ impl Battle {
     }
 
     /// `Battle#directDamage` with Gen 1's confusion/Jump Kick Substitute behaviour when `special`.
-    pub(crate) fn direct_damage(&mut self, d: u32, p: Player, special: bool) -> u32 {
+    pub(crate) fn direct_damage<S: Sink>(&mut self, d: u32, p: Player, kind: Direct, s: &mut S) -> u32 {
         if self.sides[p].mon().hp == 0 || d == 0 {
             return 0;
         }
         let d = d.max(1);
-        if special {
+        if kind != Direct::Plain {
             self.last_damage = d;
             if self.sides[p].active.has(v::SUBSTITUTE) {
+                const HINT: &str = "In Gen 1, if a Pokemon with a Substitute hurts itself due to confusion or Jump Kick/Hi Jump Kick recoil and the target";
                 let q = 1 - p;
                 if self.sides[q].active.has(v::SUBSTITUTE) {
                     self.sides[q].active.sub_hp -= d as i32;
                     if self.sides[q].active.sub_hp <= 0 {
-                        self.remove_volatile(q, v::SUBSTITUTE);
+                        self.remove_volatile(q, v::SUBSTITUTE, s);
                         self.sides[q].mon_mut().set_sub_fainted(true);
+                    } else {
+                        plog!(s, |l| {
+                            let i = self.ident(l, q);
+                            l.add(format!("|-activate|{i}|Substitute|[damage]"));
+                        });
                     }
+                    plog!(s, |l| l.hint(&format!("{HINT} has a Substitute, the target's Substitute takes the damage."), false, None));
                     return d;
                 }
+                plog!(s, |l| l.hint(&format!("{HINT} does not have a Substitute there is no damage dealt."), false, None));
                 return 0;
             }
         }
-        self.mon_damage(p, d)
+        let dealt = self.mon_damage(p, d);
+        plog!(s, |l| self.add_health(l, "-damage", p, if kind == Direct::Confusion { "|[from] confusion" } else { "" }));
+        dealt
     }
 
     /// `Battle#heal`. Returns the HP restored (0 = failed).
-    pub(crate) fn heal(&mut self, d: u32, p: Player) -> u32 {
+    pub(crate) fn heal<S: Sink>(&mut self, d: u32, p: Player, how: Heal, s: &mut S) -> u32 {
         let d = if d != 0 && d <= 1 { 1 } else { d };
         if d == 0 {
             return 0;
@@ -341,17 +469,25 @@ impl Battle {
         let new = (m.hp as u32 + d).min(max);
         let healed = new - m.hp as u32;
         self.sides[p].mon_mut().hp = new as u16;
+        plog!(s, |l| {
+            let rest = match how {
+                Heal::Move => String::new(),
+                Heal::Drain(of) => format!("|[from] drain|[of] {}", self.ident(l, of)),
+                Heal::Silent => "|[silent]".into(),
+            };
+            self.add_health(l, "-heal", p, &rest);
+        });
         healed
     }
 
     /// `applyRecoilDamage` (Gen 4 mod, inherited by Gen 1: rounds down).
-    pub(crate) fn apply_recoil(&mut self, dealt: u32, mv: u8, p: Player) {
+    pub(crate) fn apply_recoil<S: Sink>(&mut self, dealt: u32, mv: u8, p: Player, s: &mut S) {
         let r = data::MOVES[mv as usize].recoil;
         if r[1] == 0 {
             return;
         }
         let recoil = (dealt as u64 * r[0] as u64 / r[1] as u64).max(1) as u32;
-        self.damage(recoil, p, Some(p), Dmg::Recoil);
+        self.damage(recoil, p, Some(p), Dmg::Recoil, s);
     }
 
     // ---- Boosts ------------------------------------------------------------------------------
@@ -359,7 +495,7 @@ impl Battle {
     /// Gen 1 `Battle#boost`. `effect_is_move_damaging` describes the source effect for Mist:
     /// `Some(true)` a damaging move, `Some(false)` a status move, `None` a non-move effect (Rage).
     /// Returns `success` (`true` or `null` = false).
-    pub(crate) fn boost(&mut self, boosts: [i8; 7], p: Player, source: Option<Player>, effect_damaging: Option<bool>) -> bool {
+    pub(crate) fn boost<S: Sink>(&mut self, boosts: [i8; 7], p: Player, source: Option<Player>, effect_damaging: Option<bool>, s: &mut S) -> bool {
         if self.sides[p].mon().hp == 0 {
             return false;
         }
@@ -368,15 +504,25 @@ impl Battle {
         if self.sides[p].active.has(v::MIST) && effect_damaging != Some(true) {
             if let Some(src) = source {
                 if src != p {
+                    let mut shown = false;
                     for x in b.iter_mut() {
                         if *x < 0 {
                             *x = 0;
+                            shown = true;
                         }
+                    }
+                    // (Gen 1 status moves have no secondaries, so the message always shows.)
+                    if shown {
+                        plog!(s, |l| {
+                            let i = self.ident(l, p);
+                            l.add(format!("|-activate|{i}|move: Mist"));
+                        });
                     }
                 }
             }
         }
         let mut success = false;
+        let from = if effect_damaging.is_none() { "|[from] Rage" } else { "" };
         for (i, &delta) in b.iter().enumerate() {
             if delta == 0 {
                 continue;
@@ -384,6 +530,21 @@ impl Battle {
             let r = self.boost_by(p, i, delta);
             if r == BoostResult::Changed {
                 success = true;
+            }
+            if r != BoostResult::No {
+                plog!(s, |l| {
+                    let id = self.ident(l, p);
+                    let (msg, second) = if delta < 0 { ("-unboost", "-boost") } else { ("-boost", "-unboost") };
+                    l.add(format!("|{msg}|{id}|{}|{}{from}", BOOST_NAMES[i], delta.unsigned_abs()));
+                    if r == BoostResult::Zero {
+                        l.add(format!("|{second}|{id}|{}|1", BOOST_NAMES[i]));
+                        if delta > 0 {
+                            l.hint("In Gen 1, boosting a stat at 999 will apply a -1 drop afterwards, and the stat remains at 999.", true, None);
+                        } else {
+                            l.hint("In Gen 1, dropping a stat at 1 will apply a +1 boost afterwards, and the stat remains at 1.", true, None);
+                        }
+                    }
+                });
             }
         }
         success
@@ -567,7 +728,7 @@ impl Battle {
             let dur = dur - 1;
             self.set_vol_duration(p, id, dur);
             if dur == 0 {
-                self.remove_volatile(p, id);
+                self.remove_volatile(p, id, s);
             }
             self.faint_messages(s);
             if self.ended {
@@ -599,17 +760,18 @@ impl Battle {
     }
 
     /// `runEvent('AfterSwitchInSelf')`: residual damage on switch-in.
-    pub(crate) fn after_switch_in_self<S: Sink>(&mut self, p: Player, _s: &mut S) {
+    pub(crate) fn after_switch_in_self<S: Sink>(&mut self, p: Player, s: &mut S) {
         let m = self.sides[p].mon();
         if matches!(m.status, st::PSN | st::BRN | st::TOX) {
             let d = (m.stats[0] / 16).max(1) as u32;
-            self.damage(d, p, None, Dmg::Status);
+            self.damage(d, p, None, Dmg::Status, s);
         }
     }
 
     /// `runEvent('AfterMoveSelf', pokemon)`: residualdmg counter (100), sleep wake-up (3),
     /// PSN/BRN/TOX damage (2), Leech Seed (1).
-    pub(crate) fn after_move_self<S: Sink>(&mut self, p: Player, s: &mut S) {
+    /// `target` is the event source (the move's target): `[of]` on PSN/BRN damage.
+    pub(crate) fn after_move_self<S: Sink>(&mut self, p: Player, target: Option<Player>, s: &mut S) {
         const VOLS: u32 = 1 << v::LEECHSEED | 1 << v::RESIDUALDMG;
         if !matches!(self.sides[p].mon().status, st::SLP | st::PSN | st::BRN | st::TOX) && self.sides[p].active.vols & VOLS == 0 {
             return;
@@ -646,7 +808,7 @@ impl Battle {
                         continue;
                     }
                     if self.sides[p].mon().slp_time <= 0 {
-                        self.cure_status(p);
+                        self.cure_status(p, false, s);
                     }
                 }
                 102 => {
@@ -656,14 +818,20 @@ impl Battle {
                     }
                     let base = (m.stats[0] / 16).max(1) as u32;
                     let a = &self.sides[p].active;
+                    let counter = a.has(v::RESIDUALDMG);
                     let d = if status == st::TOX {
                         base * a.residual_counter as u32
-                    } else if a.has(v::RESIDUALDMG) {
+                    } else if counter {
                         base * a.residual_counter as u32
                     } else {
                         base
                     };
-                    self.damage(d, p, Some(p), Dmg::Status);
+                    // Toxic passes the Pokémon itself as the source; PSN/BRN take the event's.
+                    let src = if status == st::TOX { Some(p) } else { target };
+                    self.damage(d, p, src, Dmg::Status, s);
+                    if status != st::TOX && counter {
+                        plog!(s, |l| l.hint("In Gen 1, Toxic's counter is retained after Rest and applies to PSN/BRN.", true, None));
+                    }
                 }
                 v::RESIDUALDMG => {
                     if !self.sides[p].active.has(v::RESIDUALDMG) {
@@ -690,18 +858,26 @@ impl Battle {
                         counter = a.residual_counter as u32;
                     }
                     let to_leech = (self.sides[p].mon().stats[0] / 16).max(1) as u32 * counter;
-                    self.damage(to_leech, p, Some(q), Dmg::LeechSeed);
-                    self.heal(to_leech, q);
+                    let dealt = self.damage(to_leech, p, Some(q), Dmg::LeechSeed, s);
+                    let had_counter = self.sides[p].active.has(v::RESIDUALDMG);
+                    plog!(s, |l| {
+                        if had_counter {
+                            l.hint("In Gen 1, Leech Seed's damage is affected by Toxic's counter.", true, None);
+                        }
+                        if dealt == 0 || to_leech > dealt {
+                            l.hint("In Gen 1, Leech Seed recovery is not limited by the remaining HP of the seeded Pokemon.", true, None);
+                        }
+                    });
+                    self.heal(to_leech, q, Heal::Silent, s);
                 }
                 _ => {}
             }
         }
-        let _ = s;
     }
 
     /// `runEvent('AfterMove', pokemon, target)`: Wrap lock bookkeeping, Hyper Beam recharge
     /// message, Thrash end. `target_alive` is `target.hp > 0`; the target is always the foe.
-    pub(crate) fn after_move<S: Sink>(&mut self, p: Player, target: Player, _s: &mut S) {
+    pub(crate) fn after_move<S: Sink>(&mut self, p: Player, target: Player, s: &mut S) {
         const VOLS: u32 = 1 << v::PARTIALTRAPPINGLOCK | 1 << v::MUSTRECHARGE | 1 << v::LOCKEDMOVE;
         if self.sides[p].active.vols & VOLS == 0 {
             return;
@@ -727,19 +903,19 @@ impl Battle {
                     let a = self.sides[p].active;
                     if a.ptl_dur == 1 {
                         if a.ptl_total != 5 {
-                            self.add_volatile(p, v::FAKEPARTIALLYTRAPPED, p, 0);
+                            self.add_volatile(p, v::FAKEPARTIALLYTRAPPED, p, 0, s);
                             let t_slot = self.sides[target].order[0];
                             if self.sides[p].active.has(v::FAKEPARTIALLYTRAPPED) {
                                 self.sides[p].active.fpt_counterpart = t_slot;
                             }
-                            self.add_volatile(target, v::FAKEPARTIALLYTRAPPED, target, 0);
+                            self.add_volatile(target, v::FAKEPARTIALLYTRAPPED, target, 0, s);
                             let p_slot = self.sides[p].order[0];
                             if self.sides[target].active.has(v::FAKEPARTIALLYTRAPPED) {
                                 self.sides[target].active.fpt_counterpart = p_slot;
                             }
                         }
                     } else {
-                        self.add_volatile(target, v::PARTIALLYTRAPPED, p, a.ptl_move);
+                        self.add_volatile(target, v::PARTIALLYTRAPPED, p, a.ptl_move, s);
                         if a.ptl_total as i32 - a.ptl_dur as i32 > 0 && self.sides[target].active.has(v::PARTIALLYTRAPPED) {
                             self.sides[target].active.pt_maybe_locked = true;
                         }
@@ -748,11 +924,16 @@ impl Battle {
                 v::MUSTRECHARGE => {
                     if target_hp == 0 {
                         self.del_vol(p, id);
+                    } else {
+                        plog!(s, |l| {
+                            let i = self.ident(l, p);
+                            l.add(format!("|-mustrecharge|{i}"));
+                        });
                     }
                 }
                 v::LOCKEDMOVE => {
                     if self.sides[p].active.lockedmove_time <= 0 {
-                        self.remove_volatile(p, id);
+                        self.remove_volatile(p, id, s);
                     }
                 }
                 _ => {}

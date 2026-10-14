@@ -15,6 +15,12 @@
 //                mulberry32 stream, so the battle PRNG is untouched by choice selection
 //   maxSteps     cap on decision steps (default 1100)
 //   rng          record every battle PRNG call with its call site (default true)
+//   proto        record the exact protocol output (default false): Battle#send is captured, so
+//                each step gets `proto`: the [type, data] messages Showdown emitted for it
+//                ('update' = the new battle-log lines, 'sideupdate' = "p1\n|request|{...}"), and
+//                `views`: per 'update', extractChannelMessages for channels -1 (omniscient),
+//                0 (spectator), 1 (p1) and 2 (p2). `|t:|` timestamps are normalised to 0.
+//   names        optional [p1 name, p2 name] (default ["p1", "p2"])
 //
 // Trace: {id, seed, steps: [Step], end: {winner, turn, ended}, error?}
 //   steps[0] is the state after the battle starts (leads sent out); each later step is one
@@ -31,6 +37,7 @@ if (!PS_DIR) {
   process.exit(2);
 }
 const {Battle, Dex} = require(path.resolve(PS_DIR, 'dist/sim'));
+const {extractChannelMessages} = require(path.resolve(PS_DIR, 'dist/sim/battle'));
 const patches = require('./patches');
 
 const FORMATS = {
@@ -197,7 +204,17 @@ function runSpec(spec) {
   const dex = Dex.mod('gen1');
   if (patch === 'pkmn') patches.generation(dex);
   else patches.ungeneration(dex);
-  const battle = new Battle({formatid: format, seed: spec.seed});
+  const proto = !!spec.proto;
+  const sent = [];
+  const opts = {formatid: format, seed: spec.seed};
+  if (proto) {
+    opts.send = (type, data) => {
+      if (Array.isArray(data)) data = data.join('\n');
+      if (type === 'update') data = data.replace(/^\|t:\|\d+$/gm, '|t:|0');
+      if (type !== 'end') sent.push([type, data]);
+    };
+  }
+  const battle = new Battle(opts);
   if (patch === 'pkmn') patches.battle(battle);
   const rngCalls = [];
   if (spec.rng !== false) traceRng(battle, rngCalls);
@@ -210,11 +227,21 @@ function runSpec(spec) {
     return lines;
   };
   const record = (choices, legal, requests) => {
-    steps.push({choices, legal, requests, log: takeLog(), rng: rngCalls.splice(0), state: snapshot(battle)});
+    const step = {choices, legal, requests, log: takeLog(), rng: rngCalls.splice(0), state: snapshot(battle)};
+    if (proto) {
+      battle.sendUpdates();
+      step.proto = sent.splice(0);
+      step.views = step.proto.filter(m => m[0] === 'update').map(m => {
+        const c = extractChannelMessages(m[1], [-1, 0, 1, 2]);
+        return [c[-1].join('\n'), c[0].join('\n'), c[1].join('\n'), c[2].join('\n')];
+      });
+    }
+    steps.push(step);
   };
 
-  battle.setPlayer('p1', {name: 'p1', team: spec.p1});
-  battle.setPlayer('p2', {name: 'p2', team: spec.p2});
+  const names = spec.names || ['p1', 'p2'];
+  battle.setPlayer('p1', {name: names[0], team: spec.p1});
+  battle.setPlayer('p2', {name: names[1], team: spec.p2});
   // Tag each Pokémon with its original team index (Showdown reorders side.pokemon on switches).
   // The battle already started inside setPlayer, so tag in team-spec order via `set` identity.
   for (const side of battle.sides) {

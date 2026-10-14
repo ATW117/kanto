@@ -467,3 +467,39 @@ fn corrupted_env_blobs_are_rejected_or_safe() {
     assert_eq!(panicked, 0, "{panicked} of {accepted} accepted env blobs panicked");
     assert!(accepted > 1000, "only {accepted} accepted");
 }
+
+/// `ProtoGame` (protocol output + env observations) plays exactly the env's game: same masks and
+/// same observations after every step, for the same teams, seed and actions.
+#[test]
+fn proto_game_matches_env() {
+    let source = pool();
+    let cfg = EnvConfig::default();
+    for seed in 0..40u64 {
+        let mut env = Env::<Native1>::new(seed, &source);
+        // Env::new: two team samples, then the battle seed, from Rng::new(seed).
+        let mut rng = Rng::new(seed);
+        let (p1, p2) = (source.sample(&mut rng), source.sample(&mut rng));
+        let b = sim_backend::new_battle(&p1, &p2, rng.next_u64(), sim_gen1::Rules::OU);
+        let mut g = sim_backend::ProtoGame::new(b, ["p1", "p2"]);
+        g.start();
+        let mut arng = Rng::new(seed ^ 0xabc);
+        let (mut o1, mut o2) = (vec![0f32; OBS_DIM], vec![0f32; OBS_DIM]);
+        for _ in 0..400 {
+            for p in 0..2 {
+                assert_eq!(env.mask[p], g.mask[p], "seed {seed}: masks differ");
+                env.observe(p, &cfg, &mut o1);
+                g.observe(p, &mut o2);
+                assert_eq!(o1, o2, "seed {seed}: observations differ for player {p}");
+            }
+            let a1 = battle_env::opponent::random_legal(&env.mask[0], &mut arng);
+            let a2 = battle_env::opponent::random_legal(&env.mask[1], &mut arng);
+            let r = env.step(a1, a2, &cfg, &source);
+            let out = g.step_actions(a1, a2).unwrap();
+            if r.done {
+                assert!(g.battle().ended || g.battle().turn as u32 >= cfg.max_turns);
+                assert!(out.requests[0].is_none() || !g.battle().ended);
+                break;
+            }
+        }
+    }
+}

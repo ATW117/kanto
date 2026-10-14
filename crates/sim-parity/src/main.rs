@@ -115,6 +115,7 @@ fn main() {
         "shrink" => shrink(&args),
         "mutscan" => mutscan(&args),
         "regen" => regen(&args),
+        "proto-corpus" => proto_corpus(&args),
         "bench" => bench::bench(args.num("battles", 2000) as usize, args.num("seed", 1), &args.get("teams", "randbats")),
         "diff-pkmn" => {
             let compat = if args.get("compat", "pkmn") == "vanilla" { sim_gen1::Compat::Vanilla } else { sim_gen1::Compat::Pkmn };
@@ -147,6 +148,16 @@ fn fuzz(args: &Args) {
             s.max_steps = Some(ms.parse().expect("--max-steps"));
         }
         s.sim_compat = args.kv.get("sim-compat").cloned();
+        if args.flag("proto") {
+            s.proto = true;
+            // Exercise player names that need care (spaces, quotes, non-ASCII) in some battles.
+            let k = rng.below(4);
+            if k > 0 {
+                let pool = [["Red", "Blue"], ["Ash Ketchum", "Gary \"Oak\""], ["Rival_99", "Pokémon Trainer"]];
+                let p = pool[k as usize - 1];
+                s.names = Some([p[0].to_string(), p[1].to_string()]);
+            }
+        }
     }
     let started = std::time::Instant::now();
     let mut report = Report { battles: n, ..Default::default() };
@@ -402,6 +413,37 @@ fn replay_files(args: &Args) {
             }
         }
     }
+}
+
+/// `parity proto-corpus DUMP.jsonl --out FILE [--n N] [--steps S]`: turn traces recorded with
+/// `fuzz --proto --dump` into a Node-free protocol corpus (spec, choices, per-step state and
+/// protocol-output hashes), replayed by `parity fixtures` and `cargo test`.
+fn proto_corpus(args: &Args) {
+    let out = args.kv.get("out").expect("--out FILE");
+    let n = args.num("n", 200) as usize;
+    let max_steps = args.num("steps", 400) as usize;
+    let mut lines = String::new();
+    let mut k = 0;
+    for p in &args.pos[1..] {
+        for f in load_failures(Path::new(p)) {
+            if k >= n || f.divergence.is_some() || f.trace.error.is_some() {
+                continue;
+            }
+            if !matches!(replay(&f.spec, &f.trace), Replay::Match { .. }) {
+                continue;
+            }
+            let upto = f.trace.steps.len().min(max_steps);
+            let c = replay::Compact::from_trace(&f.spec, &f.trace, upto);
+            if c.proto.is_none() {
+                continue;
+            }
+            lines.push_str(&serde_json::to_string(&c).unwrap());
+            lines.push('\n');
+            k += 1;
+        }
+    }
+    std::fs::write(out, lines).unwrap_or_else(|e| panic!("{out}: {e}"));
+    println!("wrote {k} battles to {out}");
 }
 
 /// Replay every fixture: `passing/` must match, `open/` are known divergences.

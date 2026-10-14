@@ -20,6 +20,9 @@ use sim_data::gen1::SPECIES;
 use sim_gen1::state::{st, v, Battle};
 use sim_gen1::{MonSpec, Prng, Rules};
 
+mod proto_game;
+pub use proto_game::ProtoGame;
+
 /// Gen 1 with Sleep Clause Mod and Freeze Clause Mod (`[Gen 1] OU`).
 pub struct Native1;
 /// Gen 1 without clauses.

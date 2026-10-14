@@ -30,6 +30,7 @@ from ._pokemon_env import (
     OPP_ACTION_SWITCH_BASE,
     OUTCOME_ERROR,
     SPECIES_UNKNOWN,
+    ProtocolBattle,
     id_offsets,
     move_names,
     obs_layout,
@@ -38,6 +39,8 @@ from ._pokemon_env import (
 
 __all__ = [
     "VecEnv",
+    "ProtocolBattle",
+    "ProtocolTeams",
     "OBS_DIM",
     "OBS_VERSION",
     "NUM_ACTIONS",
@@ -174,3 +177,10 @@ class VecEnv:
     def restore_state(self, i: int, blob: bytes) -> None:
         """Restore env ``i``; its rows of the last returned obs/mask buffers are refreshed."""
         self._env.restore_state(i, blob)
+
+
+def ProtocolTeams(teams: str | os.PathLike[str] = "data/teams/gen1ou", validate: bool = True) -> "_native.ProtocolTeams":
+    """A team source that deals :class:`ProtocolBattle` s (``.battle(seed, names=..., format=...)``),
+    sampling both teams and the battle seed from ``seed`` the way ``VecEnv`` does. ``teams`` takes
+    the same sources as ``VecEnv`` (e.g. ``TEAMS_EVAL``)."""
+    return _native.ProtocolTeams(_resolve_teams(teams), validate)

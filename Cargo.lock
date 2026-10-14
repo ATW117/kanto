@@ -159,6 +159,8 @@ dependencies = [
  "numpy",
  "pyo3",
  "sim-backend",
+ "sim-core",
+ "sim-gen1",
 ]
 
 [[package]]
