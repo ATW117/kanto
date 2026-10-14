@@ -92,7 +92,7 @@ class VecEnv:
         seed: master seed; per-env seeds are derived from it (independent of ``threads``).
         teams: team source (see ``_resolve_teams``).
         threads: worker threads for stepping.
-        opponent: ``None`` (caller controls both players), ``"random"`` or ``"max_damage"``
+        opponent: ``None`` (caller controls both players), ``"random"``, ``"max_damage"`` or ``"lookahead"``
             (player 1 is played in Rust; ``actions[:, 1]`` is ignored and ``obs[:, 1]`` and
             ``mask[:, 1]`` are all zero/False).
         max_turns: games reaching this turn end as truncated ties.
@@ -174,3 +174,17 @@ class VecEnv:
     def restore_state(self, i: int, blob: bytes) -> None:
         """Restore env ``i``; its rows of the last returned obs/mask buffers are refreshed."""
         self._env.restore_state(i, blob)
+
+    def builtin_actions(self, kind: str, seats: np.ndarray) -> np.ndarray:
+        """int16[N]: built-in policy ``kind`` ("random" | "max_damage" | "lookahead")'s legal
+        action for player ``seats[i]`` (0 or 1) in each env ``i`` (uses the envs' own RNGs).
+        Lets a built-in bot play either seat, e.g. bot-vs-bot or seat-swapped evaluation."""
+        return self._env.builtin_actions(kind, np.ascontiguousarray(seats, dtype=np.uint8))
+
+    def opp_team_targets(self) -> tuple[np.ndarray, np.ndarray]:
+        """Privileged training labels for hidden-information auxiliary heads (never part of the
+        observation): ``(species uint8[N, 2, 6], moves uint8[N, 2, 6, 4])``. Row ``[i, p]`` is
+        the opponent's true team as seen from player ``p``: its appearance-order slots first
+        (the ``opp_mon`` blocks of ``p``'s observation), then its unrevealed Pokémon in party
+        order; true species ids and original move ids, 0 = empty."""
+        return self._env.opp_team_targets()

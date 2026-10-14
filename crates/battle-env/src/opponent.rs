@@ -12,14 +12,33 @@ pub enum Opponent {
     /// Highest base power x STAB x type effectiveness against the foe's current typing; random
     /// legal action when no damaging move is available (e.g. forced switches).
     MaxDamage,
+    /// One-turn simultaneous-move search (`Env::lookahead_action`): every own action x opponent
+    /// action is simulated `LOOKAHEAD_SAMPLES` times from a copy of the battle with a fresh RNG
+    /// seed, scored by `position_value`, and the move is drawn from the approximate Nash
+    /// strategy of the payoff matrix (regret matching). It sees the full (omniscient) state.
+    Lookahead,
 }
 
+/// Simulations per (own action, opponent action) pair for `Opponent::Lookahead`.
+pub const LOOKAHEAD_SAMPLES: u32 = 2;
+/// Regret-matching iterations over the payoff matrix.
+pub const LOOKAHEAD_RM_ITERS: usize = 64;
+
 impl Opponent {
+    pub fn name(self) -> &'static str {
+        match self {
+            Opponent::Random => "random",
+            Opponent::MaxDamage => "max_damage",
+            Opponent::Lookahead => "lookahead",
+        }
+    }
+
     pub fn parse(s: &str) -> Result<Opponent, String> {
         match s {
             "random" => Ok(Opponent::Random),
             "max_damage" => Ok(Opponent::MaxDamage),
-            _ => Err(format!("unknown opponent '{s}' (expected 'random' or 'max_damage')")),
+            "lookahead" => Ok(Opponent::Lookahead),
+            _ => Err(format!("unknown opponent '{s}' (expected 'random', 'max_damage' or 'lookahead')")),
         }
     }
 }
@@ -97,9 +116,75 @@ pub fn max_damage(v: &View, player: usize, mask: &[bool; NUM_ACTIONS], rng: &mut
 }
 
 /// The opponent's action index. `v` is only needed (and only decoded) for `MaxDamage`.
+/// `Lookahead` needs the backend and is handled by `Env::builtin_action`.
 pub fn pick(kind: Opponent, v: Option<&View>, player: usize, mask: &[bool; NUM_ACTIONS], rng: &mut Rng) -> usize {
     match kind {
         Opponent::Random => random_legal(mask, rng),
-        Opponent::MaxDamage => max_damage(v.expect("view required"), player, mask, rng),
+        Opponent::MaxDamage | Opponent::Lookahead => max_damage(v.expect("view required"), player, mask, rng),
     }
+}
+
+/// Heuristic value of a position for `player`: (sum of own HP fractions + 0.5 per Pokémon
+/// alive - 0.1 per statused Pokémon) minus the same for the foe.
+pub fn position_value(v: &View, player: usize) -> f32 {
+    let side = |p: usize| -> f32 {
+        let s = &v.sides[p];
+        let mut x = 0.0;
+        for m in &s.mons[..(s.size as usize).min(6)] {
+            if m.max_hp == 0 || m.hp == 0 {
+                continue;
+            }
+            x += m.hp as f32 / m.max_hp as f32 + 0.5;
+            if m.status != crate::obs::status::NONE {
+                x -= 0.1;
+            }
+        }
+        x
+    };
+    side(player) - side(1 - player)
+}
+
+/// Approximate equilibrium row strategy of the zero-sum game `pay[i][j]` (row maximises) by
+/// regret matching+ with linear averaging; returns the average row strategy over the first `n`
+/// rows.
+pub fn regret_matching(pay: &[[f32; NUM_ACTIONS]; NUM_ACTIONS], n: usize, m: usize, iters: usize) -> [f32; NUM_ACTIONS] {
+    let mut rr = [0f32; NUM_ACTIONS];
+    let mut rc = [0f32; NUM_ACTIONS];
+    let mut avg = [0f32; NUM_ACTIONS];
+    let strat = |r: &[f32; NUM_ACTIONS], k: usize| {
+        let mut s = [0f32; NUM_ACTIONS];
+        let tot: f32 = r[..k].iter().map(|x| x.max(0.0)).sum();
+        for i in 0..k {
+            s[i] = if tot > 0.0 { r[i].max(0.0) / tot } else { 1.0 / k as f32 };
+        }
+        s
+    };
+    for it in 0..iters {
+        let (sr, sc) = (strat(&rr, n), strat(&rc, m));
+        let w = (it + 1) as f32;
+        for i in 0..n {
+            avg[i] += w * sr[i];
+        }
+        let mut ur = [0f32; NUM_ACTIONS];
+        let mut uc = [0f32; NUM_ACTIONS];
+        for i in 0..n {
+            for j in 0..m {
+                ur[i] += pay[i][j] * sc[j];
+                uc[j] -= pay[i][j] * sr[i];
+            }
+        }
+        let er: f32 = (0..n).map(|i| sr[i] * ur[i]).sum();
+        let ec: f32 = (0..m).map(|j| sc[j] * uc[j]).sum();
+        for i in 0..n {
+            rr[i] = (rr[i] + ur[i] - er).max(0.0);
+        }
+        for j in 0..m {
+            rc[j] = (rc[j] + uc[j] - ec).max(0.0);
+        }
+    }
+    let tot: f32 = avg[..n].iter().sum();
+    for x in &mut avg[..n] {
+        *x /= tot.max(1e-9);
+    }
+    avg
 }

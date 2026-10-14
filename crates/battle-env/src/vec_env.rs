@@ -218,6 +218,32 @@ impl<B: Backend> VecEnv<B> {
         Ok(())
     }
 
+    /// Built-in policy actions: `out[i]` = `kind`'s action for player `seats[i]` in env `i`.
+    pub fn builtin_actions(&mut self, kind: crate::opponent::Opponent, seats: &[u8], out: &mut [i16]) {
+        self.pool.install(|| {
+            self.envs.par_iter_mut().zip(seats.par_iter()).zip(out.par_iter_mut()).with_min_len(8).for_each(
+                |((env, &p), o)| *o = env.builtin_action(kind, (p as usize).min(1)) as i16,
+            );
+        });
+    }
+
+    /// Hidden-information auxiliary targets ([`Env::opp_team_targets`]) for both observers:
+    /// `species` is [N, 2, 6], `moves` is [N, 2, 6, 4].
+    pub fn opp_team_targets(&self, species: &mut [u8], moves: &mut [u8]) {
+        self.pool.install(|| {
+            self.envs
+                .par_iter()
+                .zip(species.par_chunks_mut(12))
+                .zip(moves.par_chunks_mut(48))
+                .with_min_len(MIN_CHUNK)
+                .for_each(|((env, sp), mv)| {
+                    for p in 0..2 {
+                        env.opp_team_targets(p, &mut sp[6 * p..6 * p + 6], &mut mv[24 * p..24 * p + 24]);
+                    }
+                });
+        });
+    }
+
     pub fn clone_state(&self, i: usize) -> Vec<u8> {
         self.envs[i].to_bytes()
     }

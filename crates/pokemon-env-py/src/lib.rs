@@ -231,7 +231,39 @@ impl VecEnv {
         self.inner.cfg().opponent.map(|o| match o {
             Opponent::Random => "random",
             Opponent::MaxDamage => "max_damage",
+            Opponent::Lookahead => "lookahead",
         })
+    }
+
+    /// Built-in policy actions: int16[N], `kind`'s ("random" | "max_damage" | "lookahead")
+    /// legal action for player `seats[i]` (0 or 1) in each env `i`. Uses the envs' own RNGs.
+    fn builtin_actions<'py>(&mut self, py: Python<'py>, kind: &str, seats: numpy::PyReadonlyArray1<'py, u8>) -> PyResult<Bound<'py, PyArray1<i16>>> {
+        let kind = Opponent::parse(kind).map_err(PyValueError::new_err)?;
+        let n = self.inner.num_envs();
+        if seats.len() != n {
+            return Err(PyValueError::new_err(format!("seats must have length {n}")));
+        }
+        let seats = seats.as_slice()?.to_vec();
+        let mut out = vec![0i16; n];
+        let inner = &mut self.inner;
+        py.detach(|| with_inner!(inner, v => v.builtin_actions(kind, &seats, &mut out)));
+        Ok(PyArray1::from_vec(py, out))
+    }
+
+    /// Privileged labels for the hidden-information auxiliary head (training only; never part of
+    /// the observation): `(species uint8[N, 2, 6], moves uint8[N, 2, 6, 4])`. Row `[i, p]` is the
+    /// opponent team as seen from player `p`: appearance-order slots first (the observation's
+    /// `opp_mon` blocks), then the unrevealed Pokémon; true species ids and original move ids,
+    /// 0 = empty.
+    fn opp_team_targets<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyArray3<u8>>, Bound<'py, numpy::PyArray4<u8>>)> {
+        let n = self.inner.num_envs();
+        let mut sp = vec![0u8; n * 12];
+        let mut mv = vec![0u8; n * 48];
+        let inner = &self.inner;
+        py.detach(|| with_inner!(inner, v => v.opp_team_targets(&mut sp, &mut mv)));
+        let sp = PyArray1::from_vec(py, sp).reshape([n, 2, 6])?;
+        let mv = PyArray1::from_vec(py, mv).reshape([n, 2, 6, 4])?;
+        Ok((sp, mv))
     }
 }
 

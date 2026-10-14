@@ -467,3 +467,88 @@ fn corrupted_env_blobs_are_rejected_or_safe() {
     assert_eq!(panicked, 0, "{panicked} of {accepted} accepted env blobs panicked");
     assert!(accepted > 1000, "only {accepted} accepted");
 }
+
+fn step_out<'a>(
+    obs: &'a mut [f32], mask: &'a mut [bool], reward: &'a mut [f32], done: &'a mut [bool], truncated: &'a mut [bool],
+    outcome: &'a mut [i8], turns: &'a mut [u32], opp_action: &'a mut [i16], error: &'a mut [bool],
+) -> StepOut<'a> {
+    StepOut { obs, mask, reward, done, truncated, outcome, turns, opp_action, error }
+}
+
+/// `lookahead` plays legal moves, and as player 2 beats `max_damage` (player 1) more often than not.
+#[test]
+fn lookahead_beats_max_damage() {
+    let n = 64;
+    let cfg = EnvConfig { opponent: Some(Opponent::Lookahead), ..Default::default() };
+    let mut v = VecEnv::<Native1>::new(n, 11, pool(), cfg, 4);
+    let mut obs = vec![0f32; n * 2 * OBS_DIM];
+    let mut mask = vec![false; n * 2 * NUM_ACTIONS];
+    v.reset(None, &mut obs, &mut mask);
+    let (mut reward, mut done, mut trunc) = (vec![0f32; 2 * n], vec![false; n], vec![false; n]);
+    let (mut oc, mut turns, mut opp, mut err) = (vec![0i8; n], vec![0u32; n], vec![0i16; 2 * n], vec![false; n]);
+    let mut finished = vec![false; n];
+    let (mut wins, mut losses) = (0, 0);
+    let seats = vec![0u8; n];
+    for _ in 0..3000 {
+        let mut acts16 = vec![0i16; n];
+        v.builtin_actions(Opponent::MaxDamage, &seats, &mut acts16);
+        let acts: Vec<i16> = acts16.iter().flat_map(|&a| [a, 0]).collect();
+        let out = step_out(&mut obs, &mut mask, &mut reward, &mut done, &mut trunc, &mut oc, &mut turns, &mut opp, &mut err);
+        v.step(&acts, out).unwrap();
+        for i in 0..n {
+            if done[i] && !finished[i] {
+                finished[i] = true;
+                wins += (oc[i] == outcome::P2_WIN) as usize;
+                losses += (oc[i] == outcome::P1_WIN) as usize;
+            }
+        }
+        if finished.iter().all(|&f| f) {
+            break;
+        }
+    }
+    eprintln!("lookahead (p2) vs max_damage: W{wins} L{losses} of {n}");
+    assert!(wins > losses, "lookahead should beat max_damage");
+}
+
+/// Hidden-team targets: revealed slots match the observation's species ids and the true moves,
+/// and the whole target is a permutation of the opponent's true team.
+#[test]
+fn opp_team_targets_match_observation_and_team() {
+    let n = 16;
+    let mut v = VecEnv::<Native1>::new(n, 3, pool(), EnvConfig::default(), 2);
+    let mut obs = vec![0f32; n * 2 * OBS_DIM];
+    let mut mask = vec![false; n * 2 * NUM_ACTIONS];
+    v.reset(None, &mut obs, &mut mask);
+    let mut rng = Rng::new(1);
+    let opp_mon = battle_env::obs::layout().iter().find(|(k, _, _)| k == "opp_mon0").unwrap().1;
+    let (mut reward, mut done, mut trunc) = (vec![0f32; 2 * n], vec![false; n], vec![false; n]);
+    let (mut oc, mut turns, mut opp, mut err) = (vec![0i8; n], vec![0u32; n], vec![0i16; 2 * n], vec![false; n]);
+    let mut checked = 0;
+    for _ in 0..60 {
+        let mut sp = vec![0u8; n * 12];
+        let mut mv = vec![0u8; n * 48];
+        v.opp_team_targets(&mut sp, &mut mv);
+        for i in 0..n {
+            for p in 0..2 {
+                let view = Native1::view(&v.envs[i].battle);
+                let side = &view.sides[1 - p];
+                let mut want: Vec<u8> = side.mons[..side.size as usize].iter().map(|m| m.species).collect();
+                let mut got: Vec<u8> = sp[12 * i + 6 * p..12 * i + 6 * p + 6].iter().copied().filter(|&s| s != 0).collect();
+                want.sort();
+                got.sort();
+                assert_eq!(want, got);
+                let o = &obs[(2 * i + p) * OBS_DIM..];
+                for j in 0..v.envs[i].mem[p].n_revealed as usize {
+                    assert_eq!(o[opp_mon + 49 * j] as u8, sp[12 * i + 6 * p + j]);
+                    let k = v.envs[i].mem[p].reveal_order[j] as usize;
+                    assert_eq!(&mv[48 * i + 24 * p + 4 * j..48 * i + 24 * p + 4 * j + 4], &side.mons[k].moves[..]);
+                    checked += 1;
+                }
+            }
+        }
+        let acts = random_actions(&v, &mut rng);
+        let out = step_out(&mut obs, &mut mask, &mut reward, &mut done, &mut trunc, &mut oc, &mut turns, &mut opp, &mut err);
+        v.step(&acts, out).unwrap();
+    }
+    assert!(checked > 0);
+}
