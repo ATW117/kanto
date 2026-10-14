@@ -1,4 +1,4 @@
-"""Throughput benchmarks for pokemon_env.
+"""Throughput benchmarks for kanto.
 
 1. Engine only: random self-play straight through libpkmn (no logs/observations/masks).
 2. Full env: VecEnv.step with random legal actions for both players, including protocol-log
@@ -17,8 +17,8 @@ import time
 
 import numpy as np
 
-import pokemon_env as pe
-from pokemon_env import _pokemon_env as native
+import kanto as pe
+from kanto import _kanto as native
 
 
 def sample_legal(mask: np.ndarray, rng: np.random.Generator) -> np.ndarray:
@@ -73,7 +73,7 @@ def main() -> None:
     seconds = 1.0 if args.quick else 3.0
     battles = 50_000 if args.quick else 200_000
 
-    print(f"pokemon_env OBS_DIM={pe.OBS_DIM} on {platform.machine()} ({os.cpu_count()} CPUs)")
+    print(f"kanto OBS_DIM={pe.OBS_DIM} on {platform.machine()} ({os.cpu_count()} CPUs)")
     print(f"teams: {args.teams}")
     if not args.env_only:
         print("Engine only (random self-play, no logs):")

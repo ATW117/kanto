@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Generates crates/sim-data/src/gen1.rs from pokemon-showdown's resolved gen1 dex.
+// Generates crates/kanto-data/src/gen1.rs from pokemon-showdown's resolved gen1 dex.
 //
-// Usage: node tools/gen_sim_data.js <path to pokemon-showdown package> > crates/sim-data/src/gen1.rs
+// Usage: node tools/gen_sim_data.js <path to pokemon-showdown package> > crates/kanto-data/src/gen1.rs
 //
 // Everything that is plain data (stats, types, move numbers, secondaries, flags, the type chart and
 // Metronome's move list) comes from Showdown's `Dex.mod('gen1')` with inheritance resolved, so the
-// tables are exactly what Showdown 0.11.11 uses. Move *callbacks* are hand-written in sim-gen1.
+// tables are exactly what Showdown 0.11.11 uses. Move *callbacks* are hand-written in kanto-gen1.
 'use strict';
 const path = require('path');
 const psDir = process.argv[2];
@@ -17,7 +17,7 @@ const {Dex} = require(path.resolve(psDir, 'dist/sim'));
 const version = require(path.resolve(psDir, 'package.json')).version;
 const d = Dex.mod('gen1');
 
-// pkmn/engine's type order (keeps ids compatible with battle-env's observation encoding).
+// pkmn/engine's type order (keeps ids compatible with kanto-env's observation encoding).
 const TYPES = ['Normal', 'Fighting', 'Flying', 'Poison', 'Ground', 'Rock', 'Bug', 'Ghost', 'Fire', 'Water',
   'Grass', 'Electric', 'Psychic', 'Ice', 'Dragon'];
 const TYPELESS = TYPES.length; // '???'

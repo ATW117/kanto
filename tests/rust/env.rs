@@ -1,15 +1,15 @@
-//! Integration tests for battle-env (registered as a test target of crates/battle-env).
+//! Integration tests for kanto-env (registered as a test target of crates/kanto-env).
 #![allow(clippy::needless_range_loop)]
 
-use battle_env::backend::{Action, Backend, MAX_CHOICES, NUM_ACTIONS};
-use battle_env::env::{outcome, Env, EnvConfig};
-use battle_env::memory::Memory;
-use battle_env::obs::{self, OBS_DIM};
-use battle_env::pkmn1::{encode_battle, Gen1Battle, Pkmn1, LOG_BUF};
-use battle_env::protocol;
-use battle_env::rng::Rng;
-use battle_env::team::{builtin_teams, random_legal_team, Team, TeamSource};
-use battle_env::{Opponent, StepOut, VecEnv};
+use kanto_env::backend::{Action, Backend, MAX_CHOICES, NUM_ACTIONS};
+use kanto_env::env::{outcome, Env, EnvConfig};
+use kanto_env::memory::Memory;
+use kanto_env::obs::{self, OBS_DIM};
+use kanto_env::pkmn1::{encode_battle, Gen1Battle, Pkmn1, LOG_BUF};
+use kanto_env::protocol;
+use kanto_env::rng::Rng;
+use kanto_env::team::{builtin_teams, random_legal_team, Team, TeamSource};
+use kanto_env::{Opponent, StepOut, VecEnv};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -26,7 +26,7 @@ fn random_actions(v: &VecEnv<Pkmn1>, rng: &mut Rng) -> Vec<i16> {
     let mut acts = vec![0i16; 2 * v.num_envs()];
     for (i, e) in v.envs.iter().enumerate() {
         for p in 0..2 {
-            acts[2 * i + p] = battle_env::opponent::random_legal(&e.mask[p], rng) as i16;
+            acts[2 * i + p] = kanto_env::opponent::random_legal(&e.mask[p], rng) as i16;
         }
     }
     acts
@@ -171,8 +171,8 @@ fn masks_agree_with_engine_choices() {
                 assert_eq!(expected, env.mask[p]);
                 assert!(env.mask[p].iter().any(|&m| m));
             }
-            let a1 = battle_env::opponent::random_legal(&env.mask[0], &mut rng);
-            let a2 = battle_env::opponent::random_legal(&env.mask[1], &mut rng);
+            let a1 = kanto_env::opponent::random_legal(&env.mask[0], &mut rng);
+            let a2 = kanto_env::opponent::random_legal(&env.mask[1], &mut rng);
             if env.step(a1, a2, &cfg, &source).done {
                 break;
             }
@@ -196,7 +196,7 @@ fn random_games_terminate() {
             if b.done[i] {
                 finished += 1;
                 counts[b.outcome[i] as usize] += 1;
-                assert!(b.turns[i] > 0 && b.turns[i] <= battle_env::MAX_TURNS);
+                assert!(b.turns[i] > 0 && b.turns[i] <= kanto_env::MAX_TURNS);
                 assert_eq!(b.reward[2 * i], -b.reward[2 * i + 1]);
             } else {
                 assert_eq!(b.outcome[i], outcome::ONGOING);
@@ -246,7 +246,7 @@ fn illegal_actions_rejected_without_side_effects() {
     let mut acts = vec![0i16; 8];
     acts[5] = 99;
     let err = v.step(&acts, b.out()).unwrap_err();
-    let battle_env::StepError::Illegal(err) = err else { panic!("expected an illegal-action error") };
+    let kanto_env::StepError::Illegal(err) = err else { panic!("expected an illegal-action error") };
     assert_eq!((err.env, err.player), (2, 1));
     for i in 0..4 {
         assert_eq!(v.clone_state(i), before[i]);
@@ -344,17 +344,17 @@ fn revealed_moves_are_real_and_uses_bounded() {
                         let mv = mem.moves[idx as usize][k];
                         let slot = m.moves.iter().position(|&x| x == mv);
                         assert!(slot.is_some(), "revealed move {mv} not in real set");
-                        let used = battle_env::data::max_pp(mv) - m.pp[slot.unwrap()];
+                        let used = kanto_env::data::max_pp(mv) - m.pp[slot.unwrap()];
                         // The active's PP lives on the active struct and syncs on switch-out.
                         // Two-turn moves are logged on the charge turn but the engine deducts PP
                         // when the attack executes, so an interrupted charge counts as a use.
-                        let info = &battle_env::data::MOVES[mv as usize];
-                        let charge = battle_env::data::EFFECT_NAMES[info.effect as usize] == "Charge";
+                        let info = &kanto_env::data::MOVES[mv as usize];
+                        let charge = kanto_env::data::EFFECT_NAMES[info.effect as usize] == "Charge";
                         if foe.active.party_idx != idx && !charge {
                             assert!(
                                 mem.move_uses[idx as usize][k] <= used,
                                 "uses exceed PP consumed: mv {} uses {} used {} game {g} turn {}",
-                                battle_env::data::MOVE_NAMES[mv as usize],
+                                kanto_env::data::MOVE_NAMES[mv as usize],
                                 mem.move_uses[idx as usize][k],
                                 used,
                                 view.turn
@@ -363,8 +363,8 @@ fn revealed_moves_are_real_and_uses_bounded() {
                     }
                 }
             }
-            let a1 = battle_env::opponent::random_legal(&env.mask[0], &mut rng);
-            let a2 = battle_env::opponent::random_legal(&env.mask[1], &mut rng);
+            let a1 = kanto_env::opponent::random_legal(&env.mask[0], &mut rng);
+            let a2 = kanto_env::opponent::random_legal(&env.mask[1], &mut rng);
             if env.step(a1, a2, &cfg, &source).done {
                 break;
             }
@@ -502,7 +502,7 @@ fn cross_check_against_c_driver() {
 /// a real move (1 Pokémon with 1 move): only the backend's pass choice counts as a pass.
 #[test]
 fn reset_plays_no_turns_with_one_move_pkmn() {
-    use battle_env::team::Mon;
+    use kanto_env::team::Mon;
     // Snorlax (143) with Tackle (33) vs Chansey (113) with Pound (1): neither can faint in the
     // first few turns, so a reset that played real turns would show turn > 1.
     let t1 = Team::new(&[Mon::new(143, &[33], 100, [15; 4], [65535; 5])]);

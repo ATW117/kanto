@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mutation testing of the parity harness: does `parity` catch deliberate simulator bugs?
 
-Each mutant is a one-place source edit of the native simulator (crates/sim-gen1, sim-core). For
+Each mutant is a one-place source edit of the native simulator (crates/kanto-gen1, kanto-core). For
 every mutant the script builds `parity` in a scratch copy of the repository, replays recorded
 Showdown traces without Node (`parity mutscan`, over dumps made by `parity fuzz --dump`) and the
 Node-free fixtures (`parity fixtures`), and reports the mutant as caught if anything diverges.
@@ -44,8 +44,8 @@ CORPORA = [
     ("thaw", ["--battles", "2000", "--teams", "thaw", "--seed", "7105"]),
 ]
 
-G = "crates/sim-gen1/src/"
-C = "crates/sim-core/src/"
+G = "crates/kanto-gen1/src/"
+C = "crates/kanto-core/src/"
 
 # (name, file, old text, new text, note). `old` must occur exactly once in the file.
 MUTANTS = [
@@ -117,7 +117,7 @@ MUTANTS = [
     ("fast-eachevent-inverted", G + "battle.rs", "self.sides[0].active.speed != self.sides[1].active.speed {", "self.sides[0].active.speed == self.sides[1].active.speed {", "eachEvent fast path"),
     ("sort2-no-swap", C + "sort.rs", "if delta > 0 {\n            list.swap(0, 1);", "if delta > 0 && false {\n            list.swap(0, 1);", "two-item speedSort"),
     ("key-priority-inverted", C + "sort.rs", "((127 - priority as i16) as u64) << 40", "((priority as i16 + 128) as u64) << 40", "packed sort key"),
-    ("stamp-renumber-reversed", G + "events.rs", "a.vstamp[id as usize] = k as u8;", "a.vstamp[id as usize] = (n - 1 - k) as u8;", "8-bit insertion stamps; renumbering needs 255 volatile adds in one switch-in, which no corpus reaches: covered by the sim-gen1 unit test volatile_insertion_order_survives_stamp_renumbering"),
+    ("stamp-renumber-reversed", G + "events.rs", "a.vstamp[id as usize] = k as u8;", "a.vstamp[id as usize] = (n - 1 - k) as u8;", "8-bit insertion stamps; renumbering needs 255 volatile adds in one switch-in, which no corpus reaches: covered by the kanto-gen1 unit test volatile_insertion_order_survives_stamp_renumbering"),
     ("bench-brn-not-reapplied", G + "battle.rs", "m.set_bench_brn(m.status == st::BRN);", "m.set_bench_brn(false);", "packed bench stats"),
     ("disable-event-wrong-move", G + "moves.rs", "s.event(Event::DisableStart { player: t, slot: self.sides[t].order[0], mv: a.disable_move });", "s.event(Event::DisableStart { player: t, slot: self.sides[t].order[0], mv: a.disable_slot });", "event, new"),
 ]
@@ -169,7 +169,7 @@ def make_work_copy(work: Path) -> Path:
 
 def build(src: Path, jobs: int) -> tuple[bool, str]:
     env = dict(os.environ, CARGO_TARGET_DIR=str(src / "target"))
-    r = run([CARGO, "build", "--release", "-j", str(jobs), "-p", "sim-parity"], cwd=src, env=env)
+    r = run([CARGO, "build", "--release", "-j", str(jobs), "-p", "kanto-parity"], cwd=src, env=env)
     return r.returncode == 0, r.stderr[-3000:]
 
 

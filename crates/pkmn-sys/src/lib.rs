@@ -3,7 +3,7 @@
 //! libpkmn is built by `build.rs` with `-Dshowdown -Dlog`. The C ABI does not expose battle
 //! construction: per the engine's documentation, drivers in other languages serialize the
 //! `Battle` bytes themselves following `src/lib/gen1/README.md#layout` / `src/data/layout.json`
-//! (this is what the engine's own TypeScript driver does). `battle-env` does that; this crate only
+//! (this is what the engine's own TypeScript driver does). `kanto-env` does that; this crate only
 //! provides the byte-level types, layout constants and the extern functions.
 #![allow(non_camel_case_types)]
 

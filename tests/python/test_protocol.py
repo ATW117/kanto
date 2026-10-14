@@ -6,7 +6,7 @@ import random
 import numpy as np
 import pytest
 
-import pokemon_env
+import kanto
 
 TEAM = json.dumps(
     {
@@ -33,7 +33,7 @@ def play_random(pb, rng):
 def test_protocol_battle_plays_and_views_are_private():
     rng = random.Random(0)
     for seed in range(20):
-        pb = pokemon_env.ProtocolBattle(TEAM, TEAM, seed=seed, names=("Alice", "Bob"))
+        pb = kanto.ProtocolBattle(TEAM, TEAM, seed=seed, names=("Alice", "Bob"))
         outs = play_random(pb, rng)
         first = outs[0]
         assert first["update"][0].startswith("|t:|")
@@ -57,11 +57,11 @@ def test_protocol_battle_plays_and_views_are_private():
 
 
 def test_choices_and_actions_roundtrip():
-    pb = pokemon_env.ProtocolTeams(pokemon_env.TEAMS_EVAL).battle(3)
+    pb = kanto.ProtocolTeams(kanto.TEAMS_EVAL).battle(3)
     pb.start()
     for p in (0, 1):
         obs, mask = pb.observe(p)
-        assert obs.shape == (pokemon_env.OBS_DIM,) and mask.dtype == bool and mask.any()
+        assert obs.shape == (kanto.OBS_DIM,) and mask.dtype == bool and mask.any()
         for a in np.flatnonzero(mask):
             c = pb.action_to_choice(p, int(a))
             assert pb.choice_to_action(p, c) == a

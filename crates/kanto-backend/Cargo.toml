@@ -1,0 +1,15 @@
+[package]
+name = "kanto-backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "kanto-env Backend implementations backed by the native simulator."
+
+[dependencies]
+kanto-env = { path = "../kanto-env" }
+kanto-core = { path = "../kanto-core" }
+kanto-data = { path = "../kanto-data" }
+kanto-gen1 = { path = "../kanto-gen1" }
+
+[dev-dependencies]
+pkmn-sys = { path = "../pkmn-sys" }

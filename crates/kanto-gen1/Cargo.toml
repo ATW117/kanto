@@ -1,0 +1,13 @@
+[package]
+name = "kanto-gen1"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native Showdown-exact Generation I battle simulator."
+
+[features]
+trace = ["kanto-core/trace"]
+
+[dependencies]
+kanto-core = { path = "../kanto-core" }
+kanto-data = { path = "../kanto-data" }

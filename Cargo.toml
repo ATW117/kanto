@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/pkmn-sys", "crates/battle-env", "crates/pokemon-env-py", "crates/sim-core", "crates/sim-data", "crates/sim-gen1", "crates/sim-backend", "crates/sim-parity"]
+members = ["crates/pkmn-sys", "crates/kanto-env", "crates/kanto-py", "crates/kanto-core", "crates/kanto-data", "crates/kanto-gen1", "crates/kanto-backend", "crates/kanto-parity"]
 
 [workspace.package]
 version = "0.1.0"

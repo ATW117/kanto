@@ -1,0 +1,18 @@
+[package]
+name = "kanto-py"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "_kanto"
+crate-type = ["cdylib"]
+
+[dependencies]
+kanto-env = { path = "../kanto-env" }
+kanto-backend = { path = "../kanto-backend" }
+kanto-core = { path = "../kanto-core" }
+kanto-gen1 = { path = "../kanto-gen1" }
+numpy = "0.29.0"
+pyo3 = { version = "0.29", features = ["extension-module", "abi3-py310"] }

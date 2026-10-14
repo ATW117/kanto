@@ -12,9 +12,9 @@ pokemon-agent/
   third_party/pkmn-engine/   git submodule, pinned commit (Zig source)
   crates/
     pkmn-sys/                Rust FFI to libpkmn (Gen 1, showdown mode); build.rs runs `zig build`
-    battle-env/              Rust: Backend trait, VecEnv, observation encoder, team sampler, rayon
-    pokemon-env-py/          PyO3 + maturin bindings -> Python module `pokemon_env`
-  python/pokemon_env/        thin Python package (Gymnasium wrapper, typing, helpers)
+    kanto-env/              Rust: Backend trait, VecEnv, observation encoder, team sampler, rayon
+    kanto-py/          PyO3 + maturin bindings -> Python module `kanto`
+  python/kanto/        thin Python package (Gymnasium wrapper, typing, helpers)
   data/teams/gen1ou/         team pool (JSON, schema below)
   tests/                     Rust + pytest tests
   bench/                     throughput benchmarks
@@ -24,7 +24,7 @@ pokemon-agent/
 Toolchains on the DGX Spark (aarch64): Rust in `~/.cargo`, Zig 0.16 at
 `~/tools/zig-aarch64-linux-0.16.0`, Python 3.12, `uv` at `~/.local/bin/uv` (use a project `.venv`).
 
-## Backend trait (Rust, `battle-env`)
+## Backend trait (Rust, `kanto-env`)
 
 ```rust
 pub trait Backend: Send + Sync + 'static {
@@ -56,10 +56,10 @@ Deviations from the original sketch (Stage 2 implementation):
   the observer-frame opponent-action label (`info["opp_action_obs_frame"]`).
 `Outcome` = ongoing / p1 win / p2 win / tie. Turn cap: 1000 turns -> tie (truncated).
 
-## Python API (`pokemon_env`)
+## Python API (`kanto`)
 
 ```python
-env = pokemon_env.VecEnv(num_envs=N, seed=0, teams="data/teams/gen1ou", threads=16)
+env = kanto.VecEnv(num_envs=N, seed=0, teams="data/teams/gen1ou", threads=16)
 obs, mask = env.reset()          # obs: float32[N, 2, OBS_DIM], mask: bool[N, 2, NUM_ACTIONS]
 obs, mask, reward, done, info = env.step(actions)   # actions: int16[N, 2]
 env.clone_state(i) -> bytes / env.restore_state(i, blob)   # for search
@@ -107,7 +107,7 @@ Each player sees only what a Showdown player would see:
   Unrevealed slots and moves are encoded as "unknown".
 - This needs per-player `Memory` (reveal tracking) updated from the battle log each turn.
 
-Vector layout is owned by `battle-env::obs` and documented in `docs/OBSERVATION.md`. Versioned:
+Vector layout is owned by `kanto-env::obs` and documented in `docs/OBSERVATION.md`. Versioned:
 `OBS_VERSION`.
 
 ## Team data schema (`data/teams/gen1ou/*.json`)

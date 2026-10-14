@@ -91,7 +91,7 @@ function traceRng(battle, sink) {
 // Everything the Gen 1 mechanics read is snapshotted, including fields no message shows
 // (statusState.source, subFainted, the bench's modifiedStats, trap partners, moveThisTurn,
 // trapped/maybeLocked) and the insertion order of volatiles, which decides how tied handlers are
-// shuffled. crates/sim-parity/src/snapshot.rs must produce the same structure.
+// shuffled. crates/kanto-parity/src/snapshot.rs must produce the same structure.
 const VOL_KEYS = ['time', 'startTime', 'duration', 'totalDuration', 'damage', 'hp', 'counter', 'accuracy',
   'slotIndex', 'move', 'maybeLocked'];
 // Volatile fields that hold a Pokémon: snapshotted as its original team slot.

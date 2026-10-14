@@ -1,7 +1,7 @@
 # Native simulator: design (Stage 3)
 
 Goal: an open, fast, **Showdown-exact** battle simulator in Rust, built for several generations and
-starting with Gen 1. It implements `battle_env::Backend`, so it can replace pkmn/engine under the
+starting with Gen 1. It implements `kanto_env::Backend`, so it can replace pkmn/engine under the
 unchanged Python API: `VecEnv(..., backend="native")`.
 
 "Exact" means: given the same teams, PRNG seed and choices, the native simulator makes the same
@@ -13,23 +13,23 @@ same legal choices. The parity harness (below) checks this; it is the main deliv
 ## Crates
 
 ```
-crates/sim-core     PRNG (Gen 5 LCG + sodium/ChaCha20), speedSort/comparePriority with tie RNG,
+crates/kanto-core     PRNG (Gen 5 LCG + sodium/ChaCha20), speedSort/comparePriority with tie RNG,
                     PRNG call tracing (feature "trace"), Choice / Event / Sink, the Generation trait
-crates/sim-data     tables generated per gen from Showdown's resolved dex (tools/gen_sim_data.js)
-crates/sim-gen1     the Gen 1 battle: state.rs (Copy state), battle.rs (turn loop, queue, requests),
+crates/kanto-data     tables generated per gen from Showdown's resolved dex (tools/gen_sim_data.js)
+crates/kanto-gen1     the Gen 1 battle: state.rs (Copy state), battle.rs (turn loop, queue, requests),
                     events.rs (statuses, volatiles, damage, boosts, handler dispatch),
                     moves.rs (runMove/useMove/tryMoveHit/moveHit/getDamage + move callbacks),
                     ser.rs (validated fixed-size serialisation for clone_state)
-crates/sim-backend  battle_env::Backend impls (Native1 = [Gen 1] OU rules, Native1Nc = no clauses),
+crates/kanto-backend  kanto_env::Backend impls (Native1 = [Gen 1] OU rules, Native1Nc = no clauses),
                     examples/bench.rs (speed vs pkmn)
-crates/sim-parity   the `parity` CLI: Showdown fuzzing/replay/shrinking, fixtures, diff vs pkmn
+crates/kanto-parity   the `parity` CLI: Showdown fuzzing/replay/shrinking, fixtures, diff vs pkmn
 parity/showdown     runner.js (drives Showdown), patches.js (pkmn's Showdown patches, optional)
 parity/fixtures     Node-free regression corpora + harness-sensitivity fixtures
 ```
 
 ### State
 
-`sim_gen1::Battle` is a plain `Copy` struct of 760 bytes. Clone is a memcpy (about 18 ns), and the
+`kanto_gen1::Battle` is a plain `Copy` struct of 760 bytes. Clone is a memcpy (about 18 ns), and the
 hot path does not allocate. The PRNG is stored inside the battle. The layout follows Showdown's
 objects, so each field Showdown reads has exactly one home:
 
@@ -75,7 +75,7 @@ require (single-threaded: about 110 ns per update, see docs/SIM_STATUS.md):
   public entry points check it) and the active slot is clamped to the team size (a no-op for
   valid states, which `validate` guarantees for blobs). This is safe code; there is no `unsafe`.
 
-`cargo run --release -p sim-backend --example bench -- 20000 randbats 1 breakdown` prints the
+`cargo run --release -p kanto-backend --example bench -- 20000 randbats 1 breakdown` prints the
 time per update, per `choices()` call, per state copy and per blob encode/decode, for both
 engines; the `native` mode plays only the native games, for `valgrind --tool=callgrind`.
 
@@ -86,7 +86,7 @@ order (`turn_loop`, `run_action`, `run_move`, `use_move`, `try_move_hit`, `move_
 `get_damage`, ...). Showdown's event system matters for exactness in only one way: wherever it
 sorts handlers or actions (`speedSort`), a tie consumes the PRNG. So each place where Gen 1 has
 more than one handler builds the handlers actually present, in Showdown's discovery order, with
-their (order, priority, speed, subOrder) keys. It then runs the generic `sim_core::sort::speed_sort`,
+their (order, priority, speed, subOrder) keys. It then runs the generic `kanto_core::sort::speed_sort`,
 which is Showdown's selection sort plus Fisher-Yates on ties. The places are:
 
 - `BeforeMove`, `AfterMoveSelf`, `AfterMove`, `DisableMove`, `SetStatus` (Sleep/Freeze Clause Mod
@@ -145,7 +145,7 @@ action under a speed tie does too.
   Speed DV/EV and every other stat attainable for the species and level, flag bits in range,
   boosts in -6..=6, volatile bits and counters in range, trap-partner slots, `pokemonLeft`
   equal to the live count, and a decision point (empty queue, faints processed). A blob that fails
-  is rejected. Fuzz tests (sim-gen1 `tests/robustness.rs`, sim-backend `tests/native.rs`) corrupt
+  is rejected. Fuzz tests (kanto-gen1 `tests/robustness.rs`, kanto-backend `tests/native.rs`) corrupt
   random bytes of real mid-game blobs: every one is either rejected or steps without panicking.
   Without validation, the same fuzz panics about 900 times in 40,000 corruptions. Env blobs also
   validate the reveal memories.
@@ -159,16 +159,16 @@ action under a speed tie does too.
 
 ### Per-generation extension
 
-`sim_core::Generation` is the per-gen interface: `request`, `choices`, `update(c1, c2, sink)`,
-`turn`, `outcome`. `sim_core::Event`/`Sink` is a structured event stream; the env builds reveal
+`kanto_core::Generation` is the per-gen interface: `request`, `choices`, `update(c1, c2, sink)`,
+`turn`, `outcome`. `kanto_core::Event`/`Sink` is a structured event stream; the env builds reveal
 memory from it, and `()` compiles it away. A new generation adds:
 
-1. A `sim-genN` crate with its own `Copy` state and mechanics, ported the same way.
-2. `sim-data/src/genN.rs`, from `tools/gen_sim_data.js` pointed at `Dex.mod('genN')`.
-3. A `Backend` impl in `sim-backend`.
+1. A `kanto-genN` crate with its own `Copy` state and mechanics, ported the same way.
+2. `kanto-data/src/genN.rs`, from `tools/gen_sim_data.js` pointed at `Dex.mod('genN')`.
+3. A `Backend` impl in `kanto-backend`.
 
 The runner, replay, snapshot comparison and fuzzer are generation-agnostic except for the snapshot
-mapping (`sim-parity/src/snapshot.rs`). The PRNG, sorting, choices and tracing are shared.
+mapping (`kanto-parity/src/snapshot.rs`). The PRNG, sorting, choices and tracing are shared.
 
 ## Parity harness
 
@@ -179,7 +179,7 @@ spec (teams, seed, choiceSeed|choices, format, patch)
                              │ protocol log, every PRNG call [call site, lo, hi, value], state   │
                              └──────────────────────────────────────────────────────────────────┘
                                                    │ JSON lines
-   native Battle ◄── same seed/choices ── crates/sim-parity (replay.rs)
+   native Battle ◄── same seed/choices ── crates/kanto-parity (replay.rs)
      compare per step: legal choices → PRNG call sequence → public events → full state snapshot
      first divergence → category + context (diffs, PRNG calls side by side, log)
 ```
@@ -228,7 +228,7 @@ spec (teams, seed, choiceSeed|choices, format, patch)
   - Seeds: Gen 5 or sodium.
   - Format and patch mode.
   - Specs may use any name Showdown accepts, including its aliases (`hijumpkick`, `vicegrip`).
-    Aliases resolve through `sim_data::gen1::ALIASES`, which is generated from Showdown.
+    Aliases resolve through `kanto_data::gen1::ALIASES`, which is generated from Showdown.
 
   It runs N Showdown workers (≤ 5 here), replays each battle, and writes `report.json`. The report
   has: divergence rate, kinds and top categories; moves/cants at divergent steps; verified-move
@@ -248,7 +248,7 @@ spec (teams, seed, choiceSeed|choices, format, patch)
   with the recorded category) and rewrites the file.
 - **Mutation testing** (`parity/mutate.py`): checks that the harness itself catches simulator
   bugs.
-  - About 50 one-place source mutants of sim-gen1/sim-core are applied, one at a time, to a
+  - About 50 one-place source mutants of kanto-gen1/kanto-core are applied, one at a time, to a
     scratch copy of the repository.
   - For each mutant it rebuilds `parity` and replays five recorded Showdown corpora without Node:
     mixed, stall, random-gen1nc, targeted and thaw, recorded once with `fuzz --dump` and replayed
@@ -261,23 +261,23 @@ spec (teams, seed, choiceSeed|choices, format, patch)
   slots, HP and status are compared after every update. This needs no Node and is fast, but pkmn
   targets an older patched Showdown, so it is a drift detector, not the ground truth.
 
-Run: `PS_DIR=<node_modules/pokemon-showdown> NODE=<node> cargo run --release -p sim-parity --bin
+Run: `PS_DIR=<node_modules/pokemon-showdown> NODE=<node> cargo run --release -p kanto-parity --bin
 parity -- fuzz --battles 5000 --jobs 5 --teams mixed`.
 
 ## Protocol output
 
 Showdown's text protocol is produced by the same code path, through the sink:
-`sim_core::Sink::log()` returns `None` for the env's sinks and `Some(&mut Log)` for
-`sim_core::ProtoSink`, so every `this.add(...)` site of Showdown's Gen 1 code has a
+`kanto_core::Sink::log()` returns `None` for the env's sinks and `Some(&mut Log)` for
+`kanto_core::ProtoSink`, so every `this.add(...)` site of Showdown's Gen 1 code has a
 `plog!(s, |l| ...)` counterpart at the same point in the ported function, and the fast path builds
-no strings. `sim_core::proto::Log` mirrors `Battle#log` and its helpers (`add`, `addSplit`,
+no strings. `kanto_core::proto::Log` mirrors `Battle#log` and its helpers (`add`, `addSplit`,
 `addMove`/`attrLastMove` with `[still]`/`[miss]`/`[notarget]`, `hint` with the once-set and
 side-only hints, Haze's `[silent]` append); `extract_channel` is `extractChannelMessages`.
-`sim_gen1::proto` has the identifiers, `getHealth` (exact HP for the owner, HP Percentage Mod for
+`kanto_gen1::proto` has the identifiers, `getHealth` (exact HP for the owner, HP Percentage Mod for
 everyone else), `getDetails`, the header, and the `|request|` JSON
 (`getMoveRequestData`/`getRequestData` with Showdown's key order and Cancel Mod's `noCancel`).
 `ProtocolBattle` wraps a battle and returns, per step, what a `BattleStream` emits: the `update`
-lines and both requests. `sim_backend::ProtoGame` adds the env's reveal memory, observations,
+lines and both requests. `kanto_backend::ProtoGame` adds the env's reveal memory, observations,
 masks and auxiliary labels, so one battle serves an external agent (protocol) and ours
 (observations). Player names and nicknames live in the `Log`, not in the `Copy` battle state.
 
@@ -296,5 +296,5 @@ One deliberate difference follows Showdown 0.11.11: a sleeping or frozen Pokémo
 partially trapped) is offered a single "Fight" action, `Move(0)`. pkmn offers all moves with PP.
 
 Reveal memory is updated from the simulator's event stream, through the same backend-agnostic
-`battle_env::reveal` code the pkmn backend now uses. `clone_state` blobs use the validated
+`kanto_env::reveal` code the pkmn backend now uses. `clone_state` blobs use the validated
 serialiser; a malformed blob is rejected, never transmuted.

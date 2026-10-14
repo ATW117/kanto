@@ -1,4 +1,4 @@
-// Generates crates/battle-env/src/data/generated.rs from:
+// Generates crates/kanto-env/src/data/generated.rs from:
 //   - the pinned pkmn engine (species/move ids, base stats, types, move data, type chart), and
 //   - Pokémon Showdown's gen1 data (learnsets and Gen 1 random-battle sets; MIT licensed).
 //
@@ -125,6 +125,6 @@ rs += sets.map(([sp, s]) => {
   return `    (${sp}, ${s.level ?? 100}, &[${ms.join(', ')}]),`;
 }).join('\n') + '\n];\n';
 
-const out = path.join(ROOT, 'crates/battle-env/src/data/generated.rs');
+const out = path.join(ROOT, 'crates/kanto-env/src/data/generated.rs');
 fs.writeFileSync(out, rs);
 console.log(`wrote ${out}: ${species.length} species, ${moves.length} moves, ${sets.length} randbats sets`);

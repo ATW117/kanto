@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-import pokemon_env as pe
+import kanto as pe
 
 
 def sample_legal(mask: np.ndarray, rng: np.random.Generator) -> np.ndarray:
@@ -131,9 +131,9 @@ def test_builtin_opponent(opponent):
 
 def test_gymnasium_wrapper():
     gym = pytest.importorskip("gymnasium")
-    from pokemon_env.gym import PokemonGen1Env
+    from kanto.gym import Gen1Env
 
-    env = PokemonGen1Env(opponent="max_damage", teams="builtin")
+    env = Gen1Env(opponent="max_damage", teams="builtin")
     obs, _ = env.reset(seed=0)
     assert env.observation_space.contains(obs)
     rng = np.random.default_rng(0)

@@ -77,12 +77,12 @@ then put to sleep. Showdown gives no ground truth here, and fuzz runs exclude th
 are rare: 1 in about 2,000 targeted battles, 2 in the 40,998 v1 battles. The audit's repro hit the
 state in 111 of 200 seeds. The native simulator used to assert and panic here. It now reads move
 slot 0, as pkmn/engine does, and records that as `lastEnemySelectedMove`. Regression tests:
-`crates/sim-gen1/tests/robustness.rs`, `crates/sim-backend/tests/native.rs`, and
+`crates/kanto-gen1/tests/robustness.rs`, `crates/kanto-backend/tests/native.rs`, and
 `tests/python/test_env.py::test_move_slot_null_regression`.
 
 ## Protocol parity (`parity fuzz --proto`, 2026-10-14)
 
-The simulator writes Showdown's text protocol when its sink records one (`sim_core::ProtoSink`;
+The simulator writes Showdown's text protocol when its sink records one (`kanto_core::ProtoSink`;
 the env's `()` sink compiles it away, so throughput is unchanged: 4.89 M randbats turns/s). In
 proto mode the runner captures `Battle#send`, and at every decision step the harness compares,
 on top of the checks above:
@@ -116,7 +116,7 @@ hashes of the update and both requests) replays the protocol without Node in `ca
 ## Mutation testing (`parity/mutate.py`)
 
 Mutation testing checks whether the harness catches simulator bugs. Each mutant is a one-place
-source edit of sim-gen1/sim-core. The script rebuilds `parity` in a scratch copy and replays five
+source edit of kanto-gen1/kanto-core. The script rebuilds `parity` in a scratch copy and replays five
 recorded Showdown corpora without Node:
 
 - mixed: 1,000 battles;
@@ -144,7 +144,7 @@ The original 52 give the same 46 / 52 with the same 6 equivalent survivors; 9 of
 are caught (BeforeMove/AfterMoveSelf/Residual/lock masks and fast paths, the eachEvent shortcut,
 the two-item sort, the packed priority key, the bench burn bit). The survivor,
 `stamp-renumber-reversed`, needs 255 volatile insertions within one switch-in, which no recorded
-corpus reaches; the sim-gen1 unit test `volatile_insertion_order_survives_stamp_renumbering`
+corpus reaches; the kanto-gen1 unit test `volatile_insertion_order_survives_stamp_renumbering`
 (insertion order vs a model over 20,000 adds/deletes) fails on it.
 
 What changed:
@@ -235,7 +235,7 @@ tests:
 
 | Issue | Fix | Tests |
 | --- | --- | --- |
-| A1: "moveSlot is null" assert on a legal state (Showdown crash case) | read slot 0 (pkmn's choice) | Rust (sim-gen1, sim-backend) + Python regression |
+| A1: "moveSlot is null" assert on a legal state (Showdown crash case) | read slot 0 (pkmn's choice) | Rust (kanto-gen1, kanto-backend) + Python regression |
 | A2: illegal choices accepted silently or panicking: switch to self/fainted/missing, 0-PP or disabled moves, out-of-range indices | `apply_choices` / `Generation::update` return `IllegalChoice`, battle untouched; `*_unchecked` for the env hot path | `illegal_choices_are_rejected`, `is_legal_matches_choices` (every choice × many states) |
 | A3: `from_bytes` checked only sizes and enums | `Battle::validate`: every id, count, range and cross-field invariant; env blobs also validate the reveal memories and reject games without legal choices | every reachable state round-trips; 40,000 random corruptions of mid-game battle blobs (~7,000 accepted) and 20,000 of env blobs step without a panic (944 panics without validation) |
 | A4: `Battle::new` panicked on empty/7-Pokémon teams and bad ids | returns `TeamError` | `new_rejects_malformed_teams` |
@@ -302,7 +302,7 @@ actions from the intersection of both legal sets.
 
 ## Speed
 
-Run `cargo run --release -p sim-backend --example bench -- 20000 <teams> [seed] [compare|breakdown]`.
+Run `cargo run --release -p kanto-backend --example bench -- 20000 <teams> [seed] [compare|breakdown]`.
 Each engine plays 20,000 games single-threaded on one DGX Spark core (aarch64, `taskset -c 5`,
 machine load 1-3 from other users; medians of 5 runs). Both engines use the same seeds and the
 same uniform-random action policy. No logging, observations or masks are produced. "Before" is

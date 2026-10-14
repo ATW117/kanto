@@ -12,7 +12,7 @@
 | `generate.py` | Samples teams from Smogon usage statistics. It wrote `teams.jsonl`. |
 | `usage/gen1_names.json` | Showdown id to display-name map for Gen 1 species and moves (from `Dex.mod('gen1')`). |
 
-The env loaders (`TeamSource::from_spec`, `pokemon_env.VecEnv(teams=...)`) check every team for
+The env loaders (`TeamSource::from_spec`, `kanto.VecEnv(teams=...)`) check every team for
 Gen 1 legality: Species Clause, learnsets and a consistent HP DV. They reject out-of-range DVs, levels
 and unknown names. The whole pool passes; `validate=False` turns off the legality part.
 

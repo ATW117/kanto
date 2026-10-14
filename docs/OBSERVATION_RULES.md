@@ -1,6 +1,6 @@
 # Observation rules: what a Gen 1 singles player can see on Pokémon Showdown
 
-This spec defines what each player may observe in `[Gen 1] OU`, so the encoder (`battle-env::obs`,
+This spec defines what each player may observe in `[Gen 1] OU`, so the encoder (`kanto-env::obs`,
 which owns the vector layout in `docs/OBSERVATION.md`) can build per-player observations that
 match what a Showdown player sees. It also proposes a feature list and a reveal-tracking design
 driven by the pkmn engine's `-Dlog` protocol.

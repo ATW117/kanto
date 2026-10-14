@@ -1,8 +1,8 @@
 # Observation layout (`OBS_VERSION = 1`)
 
 `obs[i, p]` is player `p`'s view of battle `i`: a `float32[OBS_DIM]` vector with `OBS_DIM = 752`.
-The encoder is `crates/battle-env/src/obs.rs`. The offsets below are its constants, and
-`pokemon_env.obs_layout()` / `pokemon_env.id_offsets()` export them at runtime. The visibility
+The encoder is `crates/kanto-env/src/obs.rs`. The offsets below are its constants, and
+`kanto.obs_layout()` / `kanto.id_offsets()` export them at runtime. The visibility
 rules come from [OBSERVATION_RULES.md](OBSERVATION_RULES.md). Any change to this layout must bump
 `OBS_VERSION`.
 
@@ -12,7 +12,7 @@ rules come from [OBSERVATION_RULES.md](OBSERVATION_RULES.md). Any change to this
   - species: `0` = empty slot, `1..151` = dex number, `152` = unknown (unrevealed opponent slot)
   - move: `0` = empty, `1..165` = pkmn move id, `166` = unknown (unrevealed opponent move)
 - All other fields are scaled to roughly [0, 1] (boosts to [-1, 1]).
-- Names for the ids come from `pokemon_env.species_names()` and `pokemon_env.move_names()`.
+- Names for the ids come from `kanto.species_names()` and `kanto.move_names()`.
 - Types use pkmn order: Normal, Fighting, Flying, Poison, Ground, Rock, Bug, Ghost, Fire, Water,
   Grass, Electric, Psychic, Ice, Dragon.
 - Status is a one-hot of 8, in the order `[none, psn, tox, brn, par, slp, frz, fnt]`. `tox` is shown
@@ -186,7 +186,7 @@ is computed before an auto-reset, so it is valid on `done` steps as well. With a
 ## Reveal memory
 
 Reveal memory follows OBSERVATION_RULES.md §3, driven by pkmn's `-Dlog` protocol (see
-`crates/battle-env/src/{protocol,memory,pkmn1}.rs`):
+`crates/kanto-env/src/{protocol,memory,pkmn1}.rs`):
 
 - **Species.** `|switch|` reveals the species and assigns the next opponent slot.
 - **Moves revealed and PP counted.** `|move|` without `[from]` reveals a move and counts one PP
