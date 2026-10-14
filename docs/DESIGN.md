@@ -79,8 +79,13 @@ and `mask[:, 1]` are zero. Illegal actions raise `ValueError` before any env is 
   message in `info["errors"]`. The env is then reset with new teams, and the other envs carry on.
   No panic is known (the parity harness and the robustness fuzz tests look for them), so this is
   a safety net.
+- `env.builtin_actions(kind, seats)` returns int16[N] actions of a built-in bot for player
+  `seats[i]` of each env, so a bot can play either seat. `env.opp_team_targets()` returns privileged
+  labels for training auxiliary heads: the opponent's true species/moves, in appearance order and
+  then the unrevealed Pokémon. They are never part of the observation.
 - Both players are controlled by the caller: the agent plays both sides in self-play, or one side
-  with a built-in opponent policy (`opponent="random" | "max_damage"`) handled in Rust.
+  with a built-in opponent policy (`opponent="random" | "max_damage" | "lookahead"`) handled in Rust.
+  `lookahead` is a one-turn simultaneous-move search over reseeded battle copies (omniscient).
 - `step` releases the GIL, steps all battles in parallel (rayon), auto-resets finished battles
   (`done` marks the transition that ended a game), and writes into preallocated numpy buffers.
 - Reward: +1 / -1 / 0 at game end for player 0 (player 1 gets the negation). No shaping in the env.
