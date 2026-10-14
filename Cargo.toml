@@ -26,6 +26,7 @@ default-members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/ATW117/kanto"
 
 [profile.release]
 opt-level = 3

@@ -5,10 +5,21 @@ build-backend = "maturin"
 [project]
 name = "kanto"
 version = "0.1.0"
-description = "Fast batched Gen 1 Pokémon battle environment backed by pkmn/engine"
+description = "Showdown-exact Gen 1 battle simulator in Rust, with a fast batched Python environment"
+readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
+authors = [{ name = "ATW117" }]
+keywords = ["simulator", "showdown", "gen1", "reinforcement-learning", "environment"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+]
 dependencies = ["numpy>=1.24"]
+
+[project.urls]
+Repository = "https://github.com/ATW117/kanto"
 
 [project.optional-dependencies]
 gym = ["gymnasium>=0.29"]
