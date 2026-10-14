@@ -490,6 +490,10 @@ fn proto_game_matches_env() {
                 env.observe(p, &cfg, &mut o1);
                 g.observe(p, &mut o2);
                 assert_eq!(o1, o2, "seed {seed}: observations differ for player {p}");
+                let (mut s1, mut m1, mut s2, mut m2) = ([0u8; 6], [0u8; 24], [0u8; 6], [0u8; 24]);
+                env.opp_team_targets(p, &mut s1, &mut m1);
+                g.opp_team_targets(p, &mut s2, &mut m2);
+                assert_eq!((s1, m1), (s2, m2), "seed {seed}: hidden-team targets differ for player {p}");
             }
             let a1 = battle_env::opponent::random_legal(&env.mask[0], &mut arng);
             let a2 = battle_env::opponent::random_legal(&env.mask[1], &mut arng);

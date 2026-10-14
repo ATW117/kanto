@@ -124,6 +124,13 @@ impl ProtoGame {
         <crate::Native1 as Backend>::observe(&self.pb.battle, player & 1, &self.mem[player & 1], false, out);
     }
 
+    /// Hidden-information training labels for `player` (as `VecEnv::opp_team_targets`):
+    /// `species[6]`, `moves[24]`.
+    pub fn opp_team_targets(&self, player: usize, species: &mut [u8], moves: &mut [u8]) {
+        let v = <crate::Native1 as Backend>::view(&self.pb.battle);
+        battle_env::env::team_targets(&v.sides[1 - (player & 1)], &self.mem[player & 1], species, moves);
+    }
+
     /// The Showdown choice string of env action `a` for `player` (`None` if illegal).
     pub fn action_to_choice(&self, player: usize, a: usize) -> Option<Choice> {
         (a < NUM_ACTIONS && self.mask[player & 1][a]).then(|| self.table[player & 1][a])

@@ -252,27 +252,7 @@ impl<B: Backend> Env<B> {
     /// `moves` are the Pokémon's true (original) move ids.
     pub fn opp_team_targets(&self, obs: usize, species: &mut [u8], moves: &mut [u8]) {
         let v = B::view(&self.battle);
-        let side = &v.sides[1 - obs];
-        let mem = &self.mem[obs];
-        species[..6].fill(0);
-        moves[..24].fill(0);
-        let nrev = (mem.n_revealed as usize).min(6);
-        let mut j = 0usize;
-        let mut put = |k: usize, j: &mut usize| {
-            if *j < 6 && k < 6 {
-                species[*j] = side.mons[k].species;
-                moves[4 * *j..4 * *j + 4].copy_from_slice(&side.mons[k].moves);
-                *j += 1;
-            }
-        };
-        for s in 0..nrev {
-            put(mem.reveal_order[s] as usize, &mut j);
-        }
-        for k in 0..(side.size as usize).min(6) {
-            if mem.slot_of[k] == crate::memory::UNREVEALED {
-                put(k, &mut j);
-            }
-        }
+        team_targets(&v.sides[1 - obs], &self.mem[obs], species, moves);
     }
 
     /// Play one update. Actions must be legal (check with `is_legal` first). Auto-resets when
@@ -449,4 +429,28 @@ fn read_memory(r: &mut Reader) -> Option<Memory> {
         };
     }
     m.is_valid().then_some(m)
+}
+
+/// [`Env::opp_team_targets`] for any battle: `side` is the opponent's side of the battle view and
+/// `mem` the observer's reveal memory.
+pub fn team_targets(side: &crate::obs::SideView, mem: &crate::memory::Memory, species: &mut [u8], moves: &mut [u8]) {
+    species[..6].fill(0);
+    moves[..24].fill(0);
+    let nrev = (mem.n_revealed as usize).min(6);
+    let mut j = 0usize;
+    let mut put = |k: usize, j: &mut usize| {
+        if *j < 6 && k < 6 {
+            species[*j] = side.mons[k].species;
+            moves[4 * *j..4 * *j + 4].copy_from_slice(&side.mons[k].moves);
+            *j += 1;
+        }
+    };
+    for s in 0..nrev {
+        put(mem.reveal_order[s] as usize, &mut j);
+    }
+    for k in 0..(side.size as usize).min(6) {
+        if mem.slot_of[k] == crate::memory::UNREVEALED {
+            put(k, &mut j);
+        }
+    }
 }

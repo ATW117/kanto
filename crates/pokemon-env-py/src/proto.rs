@@ -6,7 +6,7 @@ use battle_env::backend::NUM_ACTIONS;
 use battle_env::obs::OBS_DIM;
 use battle_env::rng::Rng;
 use battle_env::team::{parse_teams, Team, TeamSource};
-use numpy::PyArray1;
+use numpy::{PyArray1, PyArrayMethods};
 use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -117,6 +117,15 @@ impl ProtocolBattle {
         let mut obs = vec![0f32; OBS_DIM];
         self.game.observe(p, &mut obs);
         Ok((PyArray1::from_vec(py, obs), PyArray1::from_vec(py, self.game.mask[p].to_vec())))
+    }
+
+    /// Hidden-information training labels for ``player`` (as ``VecEnv.opp_team_targets``'s row
+    /// ``[i, player]``): ``(species uint8[6], moves uint8[6, 4])``.
+    fn opp_team_targets<'py>(&self, py: Python<'py>, player: usize) -> PyResult<(Bound<'py, PyArray1<u8>>, Bound<'py, numpy::PyArray2<u8>>)> {
+        let p = Self::check_player(player)?;
+        let (mut sp, mut mv) = (vec![0u8; 6], vec![0u8; 24]);
+        self.game.opp_team_targets(p, &mut sp, &mut mv);
+        Ok((PyArray1::from_vec(py, sp), PyArray1::from_vec(py, mv).reshape([6, 4])?))
     }
 
     /// Showdown choice string for env action ``action`` of ``player`` (``ValueError`` if illegal).
