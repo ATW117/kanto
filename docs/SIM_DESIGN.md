@@ -264,6 +264,23 @@ spec (teams, seed, choiceSeed|choices, format, patch)
 Run: `PS_DIR=<node_modules/pokemon-showdown> NODE=<node> cargo run --release -p sim-parity --bin
 parity -- fuzz --battles 5000 --jobs 5 --teams mixed`.
 
+## Protocol output
+
+Showdown's text protocol is produced by the same code path, through the sink:
+`sim_core::Sink::log()` returns `None` for the env's sinks and `Some(&mut Log)` for
+`sim_core::ProtoSink`, so every `this.add(...)` site of Showdown's Gen 1 code has a
+`plog!(s, |l| ...)` counterpart at the same point in the ported function, and the fast path builds
+no strings. `sim_core::proto::Log` mirrors `Battle#log` and its helpers (`add`, `addSplit`,
+`addMove`/`attrLastMove` with `[still]`/`[miss]`/`[notarget]`, `hint` with the once-set and
+side-only hints, Haze's `[silent]` append); `extract_channel` is `extractChannelMessages`.
+`sim_gen1::proto` has the identifiers, `getHealth` (exact HP for the owner, HP Percentage Mod for
+everyone else), `getDetails`, the header, and the `|request|` JSON
+(`getMoveRequestData`/`getRequestData` with Showdown's key order and Cancel Mod's `noCancel`).
+`ProtocolBattle` wraps a battle and returns, per step, what a `BattleStream` emits: the `update`
+lines and both requests. `sim_backend::ProtoGame` adds the env's reveal memory, observations,
+masks and auxiliary labels, so one battle serves an external agent (protocol) and ours
+(observations). Player names and nicknames live in the `Log`, not in the `Copy` battle state.
+
 ## Env integration
 
 `VecEnv(..., backend="pkmn" | "native" | "native-nc")`. `native` uses `[Gen 1] OU` rules; pkmn's

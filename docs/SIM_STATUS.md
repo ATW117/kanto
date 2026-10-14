@@ -80,6 +80,39 @@ slot 0, as pkmn/engine does, and records that as `lastEnemySelectedMove`. Regres
 `crates/sim-gen1/tests/robustness.rs`, `crates/sim-backend/tests/native.rs`, and
 `tests/python/test_env.py::test_move_slot_null_regression`.
 
+## Protocol parity (`parity fuzz --proto`, 2026-10-14)
+
+The simulator writes Showdown's text protocol when its sink records one (`sim_core::ProtoSink`;
+the env's `()` sink compiles it away, so throughput is unchanged: 4.89 M randbats turns/s). In
+proto mode the runner captures `Battle#send`, and at every decision step the harness compares,
+on top of the checks above:
+
+- the step's `update` (the new `Battle#log` lines, `|split|` blocks and `|t:|` lines included,
+  timestamps normalised);
+- the omniscient, spectator, p1 and p2 views (`extractChannelMessages`) computed from it;
+- both players' `|request|` JSON, byte for byte (key order, `noCancel`, `trapped`/`maybeLocked`,
+  Fight/Recharge/locked-move entries, `wait`/`forceSwitch`).
+
+A quarter of the battles use non-default player names (spaces, quotes, non-ASCII), which appear
+in `|player|`, `|win|` and the request.
+
+| Run (seed) | format | patch | teams | battles | steps compared | diverged |
+| --- | --- | --- | --- | ---: | ---: | ---: |
+| q1 (6001) | gen1ou | vanilla | mixed, Gen 5 + sodium seeds | 3,000 | 227,252 | 0 |
+| q2 (6002) | gen1ou | vanilla | targeted, Gen 5 + sodium seeds | 2,000 | 134,470 | 0 |
+| q3 (6003) | gen1ou | vanilla | thaw | 500 | 7,679 | 0 |
+| q4 (6004) | gen1ou | vanilla | stall (Endless Battle Clause, turn limit, `bigerror`) | 500 | 81,349 | 0 |
+| q5 (6005) | gen1ou | vanilla | random | 1,000 | 49,489 | 0 |
+| q6 (6006) | gen1ou | vanilla | legal | 1,000 | 103,349 | 0 |
+| q7 (6007) | gen1nc | vanilla | random, sodium seeds (custom-rules `|raw|` header) | 498 | 26,858 | 0 |
+| q8 (6008) | gen1ou | pkmn | mixed | 500 | 38,431 | 0 |
+| **total** | | | | **8,998** | **668,877** | **0** |
+
+(q7: 2 of 500 battles hit Showdown's own "moveSlot is null" crash and are excluded.) The harness's
+sensitivity was checked by corrupting a recorded log line, a view and a request: each is caught
+with the right category. `parity/fixtures/corpus-proto.jsonl` (143 battles, 9,506 steps; per-step
+hashes of the update and both requests) replays the protocol without Node in `cargo test`.
+
 ## Mutation testing (`parity/mutate.py`)
 
 Mutation testing checks whether the harness catches simulator bugs. Each mutant is a one-place
@@ -324,7 +357,7 @@ noise (±1-2%); `codegen-units = 1` was already set.
 | Endless Battle Clause (Gen 1 no-progress tie), 1000-turn limit | yes | yes | – |
 | PRNG: Gen 5 LCG and sodium (ChaCha20) seeds | yes | yes | – |
 | `Compat::Pkmn` (pkmn's patched Showdown) | yes | yes (f6, f7) | – |
-| Protocol text log | no (structured `Event` stream only) | every event the env consumes (harness v2) | – |
+| Protocol text log (`Battle#log` with `|split|`, per-player views, `|request|` JSON) | yes (`ProtocolBattle`, `Sink::log`) | yes: every line, view and request (`parity fuzz --proto`) | – |
 | Team validation, team preview, Gen 1 Stadium, other gens | no (the env validates teams: Species Clause, learnsets) | – | – |
 
 ## Moves
