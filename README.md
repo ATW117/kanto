@@ -41,9 +41,12 @@ Results (details in [docs/SIM_STATUS.md](docs/SIM_STATUS.md)):
 
 Fuzzed teams cover all 165 moves. Targeted scenarios force rare mechanics (freeze thaw, Disable vs
 locked moves, Counter, Mimic/Transform, Substitute, partial trapping, Bide, the Endless Battle
-Clause, speed ties). Mutation testing (`parity/mutate.py`) checks the harness itself: of 62
-one-place mutants of the simulator, 55 are caught; of the 7 survivors, 6 are equivalent (no Gen 1
-state tells them apart) and 1 is covered by a unit test. Recorded Showdown battles in
+Clause, speed ties). Mutation testing (`parity/mutate.py`, full run 2026-10-14) checks the harness itself: of 62
+one-place mutants of the simulator, 55 are caught. Of the 7 survivors, 6 are argued equivalent
+(no Gen 1 state tells them apart: `acc-no-1in256`, `pt-source-ignored`, `pt-source-hp-ignored`,
+`fpt-counterpart-ignored`, `disable-bide-check`, `move-this-turn-ignored`), and
+`stamp-renumber-reversed` needs 255 volatile insertions in one switch-in, which no corpus reaches;
+a kanto-gen1 unit test catches it. Recorded Showdown battles in
 `parity/fixtures/` replay without Node in `cargo test`.
 
 ## Speed
@@ -191,10 +194,11 @@ tests/                  Rust, Python and C tests
 
 ## Citation
 
-If you use kanto in research, please cite it:
+Placeholder: there is no paper or archived release yet, and this entry will change. Until then,
+please cite the repository:
 
 ```bibtex
-@software{kanto,
+@software{kanto,  % placeholder
   author = {ATW117},
   title  = {kanto: a Showdown-exact Gen 1 battle simulator},
   year   = {2026},

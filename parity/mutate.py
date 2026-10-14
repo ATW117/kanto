@@ -62,7 +62,7 @@ MUTANTS = [
     ("recoil-round", G + "events.rs", "let recoil = (dealt as u64 * r[0] as u64 / r[1] as u64).max(1) as u32;", "let recoil = ((dealt as u64 * r[0] as u64 + r[1] as u64 / 2) / r[1] as u64).max(1) as u32;", ""),
     ("psywave-hi-plus1", G + "moves.rs", "let hi = (1.5 * lvl as f64) as u32;", "let hi = (1.5 * lvl as f64) as u32 + 1;", ""),
     ("counter-any-type", G + "moves.rs", "(d.type_ == TYPE_NORMAL || d.type_ == TYPE_FIGHTING) && d.base_power > 0", "d.base_power > 0", ""),
-    ("counter-vs-counter-allowed", G + "moves.rs", "let selected_ok = foe.last_enemy_selected_move != mv::COUNTER;", "let selected_ok = true;", ""),
+    ("counter-vs-counter-allowed", G + "moves.rs", "let enemy_sel_ok = foe.last_enemy_selected_move != mv::COUNTER;", "let enemy_sel_ok = true;", ""),
     ("confusion-selfhit-def", G + "moves.rs", "let def = self.sides[p].active.modified[1] as u64;", "let def = self.sides[p].mon().stats[2] as u64;", ""),
     ("bide-into-sub-x1", G + "moves.rs", "uncapped = R::N(self.sides[p].active.bide_damage.wrapping_mul(2));", "uncapped = R::N(self.sides[p].active.bide_damage);", ""),
     # -- speed ties / ordering
@@ -72,7 +72,7 @@ MUTANTS = [
     # -- secondaries, status
     ("sec-skip-roll-if-statused", G + "moves.rs", "if !blocked {\n                        if sec.chance == 0", "if !blocked && !(sec.status != 0 && self.sides[t].mon().status != st::NONE) {\n                        if sec.chance == 0", ""),
     ("sec-confusion-no-minus1", G + "moves.rs", "if sec.volatile == data::vol::CONFUSION {\n                                chance -= 1;", "if sec.volatile == data::vol::CONFUSION {\n                                chance -= 0;", "confusion 1/256"),
-    ("freeze-thaw-wrong", G + "moves.rs", "if sec.status == st::BRN {\n                    self.cure_status(t);", "if sec.status == st::BRN && m.d.base_power > 100 {\n                    self.cure_status(t);", "Fire thaw"),
+    ("freeze-thaw-wrong", G + "moves.rs", "if sec.status == st::BRN {\n                    self.cure_status(t, false, s);", "if sec.status == st::BRN && m.d.base_power > 100 {\n                    self.cure_status(t, false, s);", "Fire thaw"),
     ("status-self-ignored", G + "events.rs", "m.set_status_self(self_inflicted);", "m.set_status_self(false);", "status_self"),
     ("slp-rest-3", G + "moves.rs", "mm.slp_time = 2;", "mm.slp_time = 3;", ""),
     ("slp-range-1-7", G + "events.rs", 'random_range(1, 8, "slp.onStart")', 'random_range(1, 7, "slp.onStart")', ""),
@@ -107,7 +107,7 @@ MUTANTS = [
     ("trapped-cleared-on-faint", G + "battle.rs", "        m.set_bench_brn(m.status == st::BRN);\n", "        m.set_bench_brn(m.status == st::BRN);\n        m.set_trapped(false);\n", "trapped (hidden), new"),
     # -- public events (the env's reveal memory)
     ("sub-fail-event-dropped", G + "moves.rs", "if self.sides[t].active.has(v::SUBSTITUTE) {\n                    s.event(Event::Fail);", "if self.sides[t].active.has(v::SUBSTITUTE) {", "event, new"),
-    ("status-immune-event-dropped", G + "events.rs", "if status_move {\n                    s.event(Event::Immune);\n                }", "", "event, new"),
+    ("status-immune-event-dropped", G + "events.rs", "if status_move {\n                    s.event(Event::Immune);\n", "if status_move {\n", "event, new"),
     # -- performance pass: fast paths, packed keys and packed state (each one-place edit)
     ("fast-beforemove-no-confusion", G + "moves.rs", "    | 1 << v::CONFUSION\n", "\n", "BeforeMove volatile mask"),
     ("fast-beforemove-skips-par", G + "moves.rs", "st::FRZ | st::SLP | st::PAR) && self.sides[p].active.vols & BEFORE_MOVE_VOLS == 0", "st::FRZ | st::SLP) && self.sides[p].active.vols & BEFORE_MOVE_VOLS == 0", "BeforeMove fast path"),

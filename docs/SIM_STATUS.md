@@ -147,6 +147,13 @@ the two-item sort, the packed priority key, the bench burn bit). The survivor,
 corpus reaches; the kanto-gen1 unit test `volatile_insertion_order_survives_stamp_renumbering`
 (insertion order vs a model over 20,000 adds/deletes) fails on it.
 
+**Re-run after the protocol-output change (2026-10-14).** The protocol work had moved the code
+under three mutants (`counter-vs-counter-allowed`, `freeze-thaw-wrong`,
+`status-immune-event-dropped`), whose patterns no longer matched, so `mutate.py` skipped them.
+Their patterns now target the current code. A full run gives **55 / 62** again: all three are
+caught with the counts below, and the 7 survivors are the 6 equivalent mutants listed under
+"Survivors" plus `stamp-renumber-reversed` (covered by the unit test above).
+
 What changed:
 
 - Newly caught, survivors before:
@@ -186,7 +193,7 @@ Full table, from `python3 parity/mutate.py --compare before.json`:
 | recoil-round | caught (458 / 147 / 77 / - / - / fx 39) | caught (461 / 149 / 74 / 421 / 25 / fx 39) |  |
 | psywave-hi-plus1 | caught (116 / 128 / 25 / - / - / fx 14) | caught (110 / 129 / 22 / 91 / 0 / fx 14) |  |
 | counter-any-type | caught (74 / 35 / 13 / - / - / fx 5) | caught (64 / 28 / 12 / 137 / 0 / fx 5) |  |
-| counter-vs-counter-allowed | caught (1 / 7 / 0 / 55 / 0 / fx 0) | caught (3 / 5 / 1 / 20 / 0 / fx 0) |  |
+| counter-vs-counter-allowed | caught (1 / 7 / 0 / 55 / 0 / fx 0) | caught (3 / 5 / 1 / 20 / 0 / fx 1) |  |
 | confusion-selfhit-def | caught (15 / 18 / 4 / - / - / fx 2) | caught (10 / 22 / 8 / 2 / 0 / fx 2) |  |
 | bide-into-sub-x1 | caught (0 / 0 / 0 / 10 / 0 / fx 0) | caught (2 / 0 / 0 / 3 / 0 / fx 0) |  |
 | speedtie-reverse | caught (181 / 160 / 36 / - / - / fx 15) | caught (188 / 158 / 34 / 371 / 111 / fx 15) |  |
