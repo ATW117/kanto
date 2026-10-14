@@ -497,3 +497,27 @@ fn cross_check_against_c_driver() {
     }
     let _ = std::fs::remove_file(&exe);
 }
+
+/// Reset must stop after the leads are sent out, also when a player's only choice in turn 1 is
+/// a real move (1 Pokémon with 1 move): only the backend's pass choice counts as a pass.
+#[test]
+fn reset_plays_no_turns_with_one_move_pkmn() {
+    use battle_env::team::Mon;
+    // Snorlax (143) with Tackle (33) vs Chansey (113) with Pound (1): neither can faint in the
+    // first few turns, so a reset that played real turns would show turn > 1.
+    let t1 = Team::new(&[Mon::new(143, &[33], 100, [15; 4], [65535; 5])]);
+    let t2 = Team::new(&[Mon::new(113, &[1], 100, [15; 4], [65535; 5])]);
+    let src = TeamSource::Pool(vec![t1, t2]);
+    for seed in 0..20 {
+        let mut env = Env::<Pkmn1>::new(seed, &src);
+        for round in 0..2 {
+            assert_eq!(Pkmn1::turn(&env.battle), 1, "seed {seed} round {round}: reset played real turns");
+            assert_eq!(env.steps, 0);
+            for p in 0..2 {
+                assert!(env.mask[p][0] && env.mask[p][1..].iter().all(|&x| !x));
+                assert_eq!(Pkmn1::action_of(&env.battle, p, env.table[p][0]), Action::Move(0));
+            }
+            env.reset(&src);
+        }
+    }
+}

@@ -121,16 +121,25 @@ impl<B: Backend> Env<B> {
     }
 
     /// Advance through the initial both-pass update(s) that send out the leads.
+    ///
+    /// A player passes when its only legal choice is the backend's pass choice. The mask alone
+    /// cannot tell: a lone Pokémon with a single move also has only action 0 legal, and treating
+    /// that as a pass would play real turns during reset.
     fn start(&mut self) {
         self.refresh();
-        let pass = |m: &[bool; NUM_ACTIONS]| m[0] && m[1..].iter().all(|&x| !x);
-        while pass(&self.mask[0]) && pass(&self.mask[1]) && self.steps < 4 {
+        while self.is_pass(0) && self.is_pass(1) && self.steps < 4 {
             let (c1, c2) = (self.table[0][0], self.table[1][0]);
             B::update(&mut self.battle, c1, c2, &mut self.mem);
             self.steps += 1;
             self.refresh();
         }
         self.steps = 0;
+    }
+
+    /// `player`'s only legal choice is [`Action::Pass`].
+    fn is_pass(&self, player: usize) -> bool {
+        let m = &self.mask[player];
+        m[0] && m[1..].iter().all(|&x| !x) && B::action_of(&self.battle, player, self.table[player][0]) == Action::Pass
     }
 
     /// Recompute legal choices, action tables and masks for both players.

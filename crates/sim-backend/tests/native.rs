@@ -593,3 +593,25 @@ fn opp_team_targets_match_observation_and_team() {
     }
     assert!(checked > 0);
 }
+
+/// Reset stops after the leads are sent out with 1-Pokémon, 1-move teams (only the pass choice
+/// counts as a pass, not "only action 0 legal").
+#[test]
+fn reset_plays_no_turns_with_one_move_native() {
+    use battle_env::team::{Mon, Team};
+    let t1 = Team::new(&[Mon::new(143, &[33], 100, [15; 4], [65535; 5])]);
+    let t2 = Team::new(&[Mon::new(113, &[1], 100, [15; 4], [65535; 5])]);
+    let src = TeamSource::Pool(vec![t1, t2]);
+    for seed in 0..20 {
+        let mut env = Env::<Native1>::new(seed, &src);
+        for _ in 0..2 {
+            assert_eq!(Native1::turn(&env.battle), 1, "seed {seed}: reset played real turns");
+            assert_eq!(env.steps, 0);
+            for p in 0..2 {
+                assert!(env.mask[p][0] && env.mask[p][1..].iter().all(|&x| !x));
+                assert_eq!(Native1::action_of(&env.battle, p, env.table[p][0]), Action::Move(0));
+            }
+            env.reset(&src);
+        }
+    }
+}
