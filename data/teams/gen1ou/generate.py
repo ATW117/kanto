@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Sample statistically plausible Gen 1 OU teams from Smogon usage stats ("chaos" JSON).
 
-This is the fallback / augmentation path; the main pool is teams.jsonl (Metamon). Output follows
-the DESIGN.md team schema, one team per line (JSONL). Run validate.py on the output.
+teams.jsonl in this directory was written by this script (see README.md). Output follows the team
+schema in docs/DESIGN.md, one team per line (JSONL). Run validate.py on the output.
 
 Sampling model:
   * species 1 ~ usage;  species k+1 ~ usage * teammate affinity with the species already chosen
@@ -18,9 +18,11 @@ Sampling model:
   * level 100, max DVs and stat exp (schema defaults, omitted).
 
 Usage:
-  python3 generate.py -n 500 --seed 0 -o generated.jsonl
-  python3 generate.py --stats usage/gen1ou-1630-2026-09.json --min-usage 0.01 -n 200
-Fetch fresh stats from https://www.smogon.com/stats/<YYYY-MM>/chaos/gen1ou-<cutoff>.json.
+  curl -o usage/gen1ou-1630-2026-09.json https://www.smogon.com/stats/2026-09/chaos/gen1ou-1630.json
+  python3 generate.py -n 1000 --seed 0 -o teams.jsonl
+  python3 generate.py --stats some-other-chaos.json --min-usage 0.01 -n 200
+The stats file is not part of the repository; fetch it (or a newer month) from
+https://www.smogon.com/stats/<YYYY-MM>/chaos/gen1ou-<cutoff>.json.
 """
 from __future__ import annotations
 
@@ -68,6 +70,10 @@ def main() -> int:
     args = ap.parse_args()
 
     names = json.load(open(NAMES))
+    if not os.path.exists(args.stats):
+        sys.exit(f"usage stats not found: {args.stats}\n"
+                 "download them, e.g. https://www.smogon.com/stats/2026-09/chaos/gen1ou-1630.json, "
+                 "and pass --stats (see the module docstring)")
     stats = json.load(open(args.stats))
     info, data = stats["info"], stats["data"]
     label = f"generated:smogon-chaos/{os.path.basename(args.stats)}:seed{args.seed}"

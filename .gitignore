@@ -26,8 +26,5 @@ bench/results/
 # Parity harness outputs
 parity/out/
 
-# Training runs
-runs/
-
-# Claude Code agent worktrees
-.claude/
+# Smogon usage stats (not redistributed; see data/teams/gen1ou/README.md)
+data/teams/gen1ou/usage/gen1ou-*.json
