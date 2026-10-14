@@ -8,6 +8,7 @@
 
 use crate::{map_event, track_flags, Reveal};
 use battle_env::backend::{Action, Backend, MAX_CHOICES, NUM_ACTIONS};
+use battle_env::env::opp_action;
 use battle_env::memory::Memory;
 use battle_env::obs::OBS_DIM;
 use battle_env::reveal;
@@ -23,12 +24,21 @@ pub struct ProtoGame {
     /// action index -> choice per player (valid where `mask` is set), as in `battle_env::Env`.
     pub table: [[Choice; NUM_ACTIONS]; 2],
     pub mask: [[bool; NUM_ACTIONS]; 2],
+    /// After a step: what each player's opponent chose, in that player's frame (the env's
+    /// `info["opp_action_obs_frame"]`, see `battle_env::env::opp_action`).
+    pub opp_action: [i16; 2],
 }
 
 impl ProtoGame {
     /// A new game (not started: call [`ProtoGame::start`]).
     pub fn new(battle: Battle, names: [&str; 2]) -> ProtoGame {
-        ProtoGame { pb: ProtocolBattle::new(battle, names), mem: [Memory::default(); 2], table: [[Choice::Pass; NUM_ACTIONS]; 2], mask: [[false; NUM_ACTIONS]; 2] }
+        ProtoGame {
+            pb: ProtocolBattle::new(battle, names),
+            mem: [Memory::default(); 2],
+            table: [[Choice::Pass; NUM_ACTIONS]; 2],
+            mask: [[false; NUM_ACTIONS]; 2],
+            opp_action: [opp_action::NONE; 2],
+        }
     }
 
     pub fn battle(&self) -> &Battle {
@@ -46,7 +56,24 @@ impl ProtoGame {
         if !self.pb.battle.started {
             return Ok(self.start());
         }
-        self.advance(c1, c2)
+        let b = &self.pb.battle;
+        let chosen = [self.action_of(0, c1), self.action_of(1, c2)];
+        let moves = [<crate::Native1 as Backend>::choice_move(b, 0, c1), <crate::Native1 as Backend>::choice_move(b, 1, c2)];
+        let out = self.advance(c1, c2)?;
+        // As `battle_env::Env::step`: labels use the observers' memories after the update.
+        for obs in 0..2 {
+            let q = 1 - obs;
+            self.opp_action[obs] = match chosen[q] {
+                Action::Pass => opp_action::NONE,
+                Action::Move(_) => moves[q] as i16,
+                Action::Switch(slot) => {
+                    let m = &self.mem[obs];
+                    let j = if m.is_revealed(slot) { m.slot_of[slot as usize] } else { m.n_revealed.min(5) };
+                    opp_action::SWITCH_BASE + j as i16
+                }
+            };
+        }
+        Ok(out)
     }
 
     /// Apply env actions (indices into the 10-action space; must be legal per [`Self::mask`]).

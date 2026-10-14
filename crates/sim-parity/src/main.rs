@@ -157,6 +157,18 @@ fn fuzz(args: &Args) {
                 let p = pool[k as usize - 1];
                 s.names = Some([p[0].to_string(), p[1].to_string()]);
             }
+            // Nicknames for some Pokémon (incl. one longer than Showdown's 20-character cap and
+            // one equal to the species name, which Showdown ignores).
+            let nicks = ["Bessie", "Mr. Sparkles", "A Very Long Nickname Indeed", "Ω-Zero", "Fluffy"];
+            for team in [&mut s.p1, &mut s.p2] {
+                for m in team.iter_mut() {
+                    match rng.below(6) {
+                        0 => m.name = Some(nicks[rng.below(nicks.len() as u64) as usize].to_string()),
+                        1 => m.name = Some(m.species.clone()),
+                        _ => {}
+                    }
+                }
+            }
         }
     }
     let started = std::time::Instant::now();

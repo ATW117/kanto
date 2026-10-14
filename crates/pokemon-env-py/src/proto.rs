@@ -33,8 +33,9 @@ fn choice_of(s: &str) -> PyResult<Choice> {
 }
 
 /// One step's protocol output as a dict.
-fn output_dict<'py>(py: Python<'py>, out: &StepOutput) -> PyResult<Bound<'py, PyDict>> {
+fn output_dict<'py>(py: Python<'py>, out: &StepOutput, game: &ProtoGame) -> PyResult<Bound<'py, PyDict>> {
     let d = PyDict::new(py);
+    d.set_item("opp_action_obs_frame", (game.opp_action[0], game.opp_action[1]))?;
     d.set_item("update", out.update.clone())?;
     d.set_item("omniscient", out.view(-1))?;
     d.set_item("spectator", out.view(0))?;
@@ -54,7 +55,9 @@ fn output_dict<'py>(py: Python<'py>, out: &StepOutput) -> PyResult<Bound<'py, Py
 ///   ``update`` message;
 /// - ``omniscient``, ``spectator``, ``p1``, ``p2``: that update as each channel sees it
 ///   (``extractChannelMessages``: exact HP for one's own side, percentages for the foe);
-/// - ``requests``: ``(p1, p2)`` ``|request|`` JSON strings (``None`` once the battle is over).
+/// - ``requests``: ``(p1, p2)`` ``|request|`` JSON strings (``None`` once the battle is over);
+/// - ``opp_action_obs_frame``: per player, what its opponent chose this step in its frame (as
+///   ``VecEnv``'s ``info["opp_action_obs_frame"]``).
 ///
 /// Choices are Showdown choice strings (``"move 2"``, ``"switch 3"``, ``""`` to pass).
 #[pyclass(module = "pokemon_env._pokemon_env")]
@@ -91,7 +94,7 @@ impl ProtocolBattle {
     /// Start the battle (header, leads, first requests).
     fn start<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let out = self.game.start();
-        output_dict(py, &out)
+        output_dict(py, &out, &self.game)
     }
 
     /// Apply both players' Showdown choices; raises ``ValueError`` on an illegal choice (the
@@ -99,13 +102,13 @@ impl ProtocolBattle {
     fn step<'py>(&mut self, py: Python<'py>, c1: &str, c2: &str) -> PyResult<Bound<'py, PyDict>> {
         let (a, b) = (choice_of(c1)?, choice_of(c2)?);
         let out = self.game.step(a, b).map_err(|e| PyValueError::new_err(e.to_string()))?;
-        output_dict(py, &out)
+        output_dict(py, &out, &self.game)
     }
 
     /// Apply env actions (0..10 per player, legal per ``mask``).
     fn step_actions<'py>(&mut self, py: Python<'py>, a1: usize, a2: usize) -> PyResult<Bound<'py, PyDict>> {
         let out = self.game.step_actions(a1, a2).map_err(PyValueError::new_err)?;
-        output_dict(py, &out)
+        output_dict(py, &out, &self.game)
     }
 
     /// Our env's observation and action mask for ``player``: ``(float32[OBS_DIM], bool[10])``.

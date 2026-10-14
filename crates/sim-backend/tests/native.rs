@@ -495,6 +495,7 @@ fn proto_game_matches_env() {
             let a2 = battle_env::opponent::random_legal(&env.mask[1], &mut arng);
             let r = env.step(a1, a2, &cfg, &source);
             let out = g.step_actions(a1, a2).unwrap();
+            assert_eq!(r.opp_action, g.opp_action, "seed {seed}: opponent-action labels differ");
             if r.done {
                 assert!(g.battle().ended || g.battle().turn as u32 >= cfg.max_turns);
                 assert!(out.requests[0].is_none() || !g.battle().ended);

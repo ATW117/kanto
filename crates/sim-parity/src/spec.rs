@@ -15,6 +15,9 @@ pub struct SetJson {
     pub level: u8,
     pub ivs: BTreeMap<String, u8>,
     pub evs: BTreeMap<String, u8>,
+    /// Nickname (protocol mode only; Showdown shows it instead of the species name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 const STATS: [&str; 6] = ["hp", "atk", "def", "spa", "spd", "spe"];
@@ -27,6 +30,7 @@ impl SetJson {
             level: m.level,
             ivs: STATS.iter().enumerate().map(|(i, s)| (s.to_string(), m.ivs[i])).collect(),
             evs: STATS.iter().enumerate().map(|(i, s)| (s.to_string(), m.evs[i])).collect(),
+            name: None,
         }
     }
 
@@ -77,6 +81,23 @@ fn vanilla() -> String {
 }
 
 impl Spec {
+    /// The protocol log for this spec: player names and nicknames.
+    pub fn log(&self) -> sim_core::Log {
+        let names = self.names.clone().unwrap_or_else(|| ["p1".to_string(), "p2".to_string()]);
+        let mut log = sim_core::Log::new(&names[0], &names[1]);
+        for (p, team) in [&self.p1, &self.p2].into_iter().enumerate() {
+            // Showdown: a name equal to the species (or none) means the species name; max 20 chars.
+            log.nicknames[p] = team
+                .iter()
+                .map(|s| match &s.name {
+                    Some(n) if !n.is_empty() && *n != s.species => n.chars().take(20).collect(),
+                    _ => String::new(),
+                })
+                .collect();
+        }
+        log
+    }
+
     pub fn rules(&self) -> Rules {
         let mut r = match self.format.as_str() {
             "gen1nc" => Rules::NO_CLAUSES,

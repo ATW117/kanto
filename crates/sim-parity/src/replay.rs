@@ -146,7 +146,7 @@ pub fn replay(spec: &Spec, trace: &Trace) -> Replay {
         }
     };
     let names = spec.names.clone().unwrap_or_else(|| ["p1".to_string(), "p2".to_string()]);
-    let mut sink = sim_core::ProtoSink { log: sim_core::Log::new(&names[0], &names[1]), events: Vec::new() };
+    let mut sink = sim_core::ProtoSink { log: spec.log(), events: Vec::new() };
     let mut sent = 0usize;
     if spec.proto {
         b.write_header(&mut sink.log);
@@ -424,7 +424,7 @@ impl Compact {
         let mut b = self.spec.battle().map_err(|e| (0, e))?;
         let choices = self.spec.choices.clone().unwrap_or_default();
         let names = self.spec.names.clone().unwrap_or_else(|| ["p1".to_string(), "p2".to_string()]);
-        let mut sink = sim_core::ProtoSink { log: sim_core::Log::new(&names[0], &names[1]), events: Vec::new() };
+        let mut sink = sim_core::ProtoSink { log: self.spec.log(), events: Vec::new() };
         if self.proto.is_some() {
             b.write_header(&mut sink.log);
         }
