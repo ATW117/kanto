@@ -1,28 +1,26 @@
-# pokemon-agent: Stage 2 design contract
+# Environment API
 
-Goal: a fast, batched, Gymnasium-style **Python RL environment for Gen 1 singles**, backed by
-[pkmn/engine](https://github.com/pkmn/engine) (Zig, MIT) in Showdown-compatibility mode. Later, the
-same environment API will be backed by our own Rust multi-gen simulator (Stage 3), so agents and
-training code must only depend on the API below, never on pkmn internals.
+The batched environment around the simulator: the `Backend` trait the engines implement, the
+Python API, the observation contract and the team schema. Code that uses kanto should depend only
+on this API, never on a backend's internals. The observation layout is in docs/OBSERVATION.md and
+the visibility rules in docs/OBSERVATION_RULES.md.
 
 ## Layout
 
 ```
-pokemon-agent/
-  third_party/pkmn-engine/   git submodule, pinned commit (Zig source)
-  crates/
-    pkmn-sys/                Rust FFI to libpkmn (Gen 1, showdown mode); build.rs runs `zig build`
-    kanto-env/              Rust: Backend trait, VecEnv, observation encoder, team sampler, rayon
-    kanto-py/          PyO3 + maturin bindings -> Python module `kanto`
-  python/kanto/        thin Python package (Gymnasium wrapper, typing, helpers)
-  data/teams/gen1ou/         team pool (JSON, schema below)
-  tests/                     Rust + pytest tests
-  bench/                     throughput benchmarks
-  docs/
+crates/
+  kanto-core/      generation-independent pieces: Showdown's PRNG, speedSort, Choice/Event, protocol log
+  kanto-data/      per-generation tables generated from Showdown's dex
+  kanto-gen1/      the Gen 1 simulator (Copy state, Showdown-exact mechanics, protocol output)
+  kanto-env/       Backend trait, VecEnv (rayon), observation encoder, reveal memory, opponents, teams
+  kanto-backend/   kanto-env Backend for the native simulator, ProtoGame
+  kanto-parity/    `parity` CLI: differential testing against Showdown
+  kanto-py/        PyO3 + maturin bindings -> Python module `kanto._kanto`
+  pkmn-sys/        optional: FFI to libpkmn (pkmn/engine, Gen 1, Showdown mode); build.rs runs Zig
+python/kanto/      thin Python package (Gymnasium wrapper, typing, helpers)
+data/teams/gen1ou/ team pool (JSON, schema below)
+third_party/pkmn-engine/  pkmn/engine submodule (pinned; only for the `pkmn` feature)
 ```
-
-Toolchains on the DGX Spark (aarch64): Rust in `~/.cargo`, Zig 0.16 at
-`~/tools/zig-aarch64-linux-0.16.0`, Python 3.12, `uv` at `~/.local/bin/uv` (use a project `.venv`).
 
 ## Backend trait (Rust, `kanto-env`)
 
@@ -43,13 +41,13 @@ pub trait Backend: Send + Sync + 'static {
     fn battle_from_bytes(bytes: &[u8]) -> Option<Self::Battle>;
 }
 ```
-Deviations from the original sketch (Stage 2 implementation):
+Notes:
 - `update` takes both players' `Memory` because reveals are parsed from the update's protocol log,
   which only exists inside `update`.
 - `Choice` is an associated type plus `action_of`, so env code maps backend choices to the
   10-action space without knowing pkmn's encoding (pkmn switch data is a *current* party position).
 - `view` decodes the battle into a backend-agnostic `obs::View`; `observe` (default method) runs the
-  shared encoder on it, so Stage 3 only needs to implement `view`.
+  shared encoder on it, so a new backend only needs to implement `view`.
 - Battles start with both players' only choice being `Pass`; the env auto-plays that update (the
   leads are sent out) on reset.
 - `choice_move(b, player, c) -> u8` (default 0) names the move a move choice selects. It feeds
@@ -129,10 +127,9 @@ ignored).
 - Rust tests: a seeded battle replays identically, clone/restore round-trips, and legal masks match
   `choices()`.
 - Cross-check against pkmn's own driver for the same seed and choices (identical log/outcome).
-- Spot-check versus Showdown (gen1ou, same teams/seed/choices) where practical; full RNG-level
-  parity is Stage 3's harness.
+- RNG-level parity of the native simulator with Showdown: the parity harness (docs/SIM_DESIGN.md).
 
-## Performance targets (Spark, 16 threads)
+## Performance targets (16 threads)
 
 - Engine only: >= 1M battles/s aggregate is plausible (pkmn ~108k/s/core).
 - Full env step including observation encoding into numpy: >= 2M env-steps/s at N = 4096.

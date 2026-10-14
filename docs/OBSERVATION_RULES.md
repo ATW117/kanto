@@ -218,7 +218,7 @@ Quick Attack/Counter priority.
    bit 7.
 3. **A pkmn `PokemonIdent` holds the original party slot (1-6)** ([PKMN-PROTO] `PokemonIdent`).
    Use it only as the tracking key. **Do not lay out opponent slots by original index,** because
-   that leaks team order, and Metamon teams put the lead in slot 0. Lay them out in order of first
+   that leaks team order, and real teams often put the lead in slot 0. Lay them out in order of first
    appearance.
 4. **The pkmn engine does not emit** these Showdown messages: `|player|`, `|teamsize|`,
    `|gametype|`, `|gen|`, `|tier|`, `|rule|`, `|start|`, `|request|`, `|upkeep|`, `|split|`,

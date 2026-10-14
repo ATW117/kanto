@@ -1,4 +1,4 @@
-# Native simulator: design (Stage 3)
+# Native simulator: design
 
 Goal: an open, fast, **Showdown-exact** battle simulator in Rust, built for several generations and
 starting with Gen 1. It implements `kanto_env::Backend`, so it can replace pkmn/engine under the
@@ -76,8 +76,8 @@ require (single-threaded: about 110 ns per update, see docs/SIM_STATUS.md):
   valid states, which `validate` guarantees for blobs). This is safe code; there is no `unsafe`.
 
 `cargo run --release -p kanto-backend --example bench -- 20000 randbats 1 breakdown` prints the
-time per update, per `choices()` call, per state copy and per blob encode/decode, for both
-engines; the `native` mode plays only the native games, for `valgrind --tool=callgrind`.
+time per update, per `choices()` call, per state copy and per blob encode/decode (add
+`--features pkmn` to include pkmn/engine); the `native` mode plays only the native games, for `valgrind --tool=callgrind`.
 
 ### Mechanics: plain Rust, but Showdown's ordering
 
@@ -256,7 +256,7 @@ spec (teams, seed, choiceSeed|choices, format, patch)
   - A mutant is caught if anything diverges.
   - Survivors are blind spots or equivalent mutants. The script lists the ones known to be
     equivalent, with the reason; docs/SIM_STATUS.md has the latest table.
-- **pkmn diff** (`parity diff-pkmn`): steps pkmn/engine and the native sim (patched mode, OU
+- **pkmn diff** (`parity diff-pkmn`, `--features pkmn`): steps pkmn/engine and the native sim (patched mode, OU
   rules) in lockstep. Actions are drawn from the intersection of both legal sets, and active
   slots, HP and status are compared after every update. This needs no Node and is fast, but pkmn
   targets an older patched Showdown, so it is a drift detector, not the ground truth.
@@ -283,8 +283,9 @@ masks and auxiliary labels, so one battle serves an external agent (protocol) an
 
 ## Env integration
 
-`VecEnv(..., backend="pkmn" | "native" | "native-nc")`. `native` uses `[Gen 1] OU` rules; pkmn's
-`-Dshowdown` build also enforces both clauses, so this is the drop-in replacement.
+`VecEnv(..., backend="native" | "native-nc" | "pkmn")`. `native` (the default) uses `[Gen 1] OU`
+rules; pkmn's `-Dshowdown` build (the optional `pkmn` feature) also enforces both clauses, so the
+two are interchangeable.
 
 Semantics match the pkmn backend:
 

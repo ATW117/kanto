@@ -302,7 +302,7 @@ actions from the intersection of both legal sets.
 
 ## Speed
 
-Run `cargo run --release -p kanto-backend --example bench -- 20000 <teams> [seed] [compare|breakdown]`.
+Run `cargo run --release -p kanto-backend --features pkmn --example bench -- 20000 <teams> [seed] [compare|breakdown]`.
 Each engine plays 20,000 games single-threaded on one DGX Spark core (aarch64, `taskset -c 5`,
 machine load 1-3 from other users; medians of 5 runs). Both engines use the same seeds and the
 same uniform-random action policy. No logging, observations or masks are produced. "Before" is

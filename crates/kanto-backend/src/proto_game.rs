@@ -1,6 +1,6 @@
 //! [`ProtoGame`]: one native Gen 1 battle that produces both the exact Showdown protocol (for
-//! external agents: poke-env players, Metamon, Foul Play, a real server in reverse) and the env's
-//! own observations and action masks (for our agents), from the same state.
+//! external Showdown agents, a real server in reverse) and the env's
+//! own observations and action masks (for env-based agents), from the same state.
 //!
 //! The protocol sink does not touch the PRNG or the state, so a `ProtoGame` plays exactly the
 //! game a `VecEnv(backend="native"|"native-nc")` env plays for the same battle and choices, and

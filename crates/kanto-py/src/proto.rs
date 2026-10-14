@@ -1,6 +1,6 @@
 //! `ProtocolBattle` / `ProtocolTeams`: one native Gen 1 battle that speaks the exact Showdown
 //! protocol (per-player views, `|request|` JSON) and also gives our env's observations, for
-//! playing external agents (poke-env players, Metamon, Foul Play) against ours.
+//! playing external Showdown agents against agents that use the env.
 
 use kanto_env::backend::NUM_ACTIONS;
 use kanto_env::obs::OBS_DIM;

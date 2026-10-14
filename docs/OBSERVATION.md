@@ -167,7 +167,7 @@ not exposed. `actions[:, 1]` is ignored.
 
 `step` returns `info["opp_action_obs_frame"]`, an `int16[N, 2]` array. Entry `[i, p]` is what player
 `1 - p` chose in that step, expressed in player `p`'s frame. It is meant as an auxiliary prediction
-target (for example, the PPO agent's opponent-action head). The opponent's own action index is
+target (for example, an agent's opponent-action prediction head). The opponent's own action index is
 not usable for this: its switch indices are the opponent's original team slots, which the observer
 cannot see.
 
