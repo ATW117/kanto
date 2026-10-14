@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      parity:
+        description: "Also run a short Showdown parity fuzz (installs pokemon-showdown@0.11.11)"
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: cargo test + pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+      - name: cargo build
+        run: cargo build --release --all-targets
+      - name: cargo test (default members, no pkmn/engine)
+        run: cargo test --release
+      - name: Python extension
+        run: |
+          uv venv --python 3.12 .venv
+          uv pip install --python .venv/bin/python maturin numpy pytest gymnasium
+          source .venv/bin/activate
+          maturin develop --release
+      - name: pytest
+        run: .venv/bin/pytest -q
+      - name: Python benchmark (smoke)
+        run: .venv/bin/python bench/bench.py --quick --threads 2 --envs 256
+
+  pkmn:
+    name: with the pkmn/engine backend (Zig)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: cargo test --workspace --all-features
+        env:
+          PKMN_CPU: baseline
+        run: cargo test --release --workspace --all-features
+
+  parity:
+    name: Showdown parity fuzz (optional)
+    if: github.event_name == 'workflow_dispatch' && inputs.parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install pokemon-showdown 0.11.11
+        run: mkdir -p "$RUNNER_TEMP/ps" && cd "$RUNNER_TEMP/ps" && npm install pokemon-showdown@0.11.11
+      - name: parity fuzz (state, then protocol)
+        run: |
+          export PS_DIR="$RUNNER_TEMP/ps/node_modules/pokemon-showdown" NODE="$(which node)"
+          fuzz() { cargo run --release -p kanto-parity --bin parity -- fuzz --jobs 2 "$@" | tee fuzz.log; grep -q "; diverged 0 (" fuzz.log; }
+          fuzz --battles 1000 --teams mixed
+          fuzz --battles 500 --teams targeted
+          fuzz --proto --battles 500 --teams mixed
+          cargo run --release -p kanto-parity --bin parity -- fixtures
