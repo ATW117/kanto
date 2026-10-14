@@ -151,6 +151,7 @@ pub fn bench(n: usize, seed: u64, teams: &str) {
         let mut nb = kanto_backend::new_battle(&g.0, &g.1, g.2, Rules::OU);
         play_native(&mut nb, g.3, |_| {});
     }
+    #[allow(clippy::vec_init_then_push)]
     let mut runs: Vec<(&str, Option<Compat>)> = Vec::new();
     #[cfg(feature = "pkmn")]
     runs.push(("pkmn/engine (libpkmn, -Dshowdown, no log)", None));
