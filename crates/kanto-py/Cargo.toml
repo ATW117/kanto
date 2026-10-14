@@ -9,6 +9,10 @@ publish = false
 name = "_kanto"
 crate-type = ["cdylib"]
 
+[features]
+# backend="pkmn": pkmn/engine via libpkmn (needs Zig 0.16 and the third_party/pkmn-engine submodule).
+pkmn = ["kanto-env/pkmn"]
+
 [dependencies]
 kanto-env = { path = "../kanto-env" }
 kanto-backend = { path = "../kanto-backend" }

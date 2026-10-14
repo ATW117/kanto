@@ -9,12 +9,15 @@ description = "Parity harness: differential testing of the native simulator agai
 name = "parity"
 path = "src/main.rs"
 
+[features]
+# `bench` against pkmn/engine and `diff-pkmn`.
+pkmn = ["kanto-env/pkmn"]
+
 [dependencies]
 kanto-core = { path = "../kanto-core", features = ["trace"] }
 kanto-data = { path = "../kanto-data" }
 kanto-gen1 = { path = "../kanto-gen1", features = ["trace"] }
 kanto-backend = { path = "../kanto-backend" }
-pkmn-sys = { path = "../pkmn-sys" }
 kanto-env = { path = "../kanto-env" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

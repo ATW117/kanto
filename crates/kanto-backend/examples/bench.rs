@@ -3,7 +3,8 @@
 //! `cargo run --release -p kanto-backend --example bench -- [battles] [teams] [seed] [mode]`
 //!
 //! `mode`:
-//! - `compare` (default): pkmn/engine vs native (vanilla and pkmn-patched), turns/s.
+//! - `compare` (default): native (vanilla and pkmn-patched) turns/s, and pkmn/engine with
+//!   `--features pkmn`.
 //! - `breakdown`: native timing breakdown (update, choices, state copy, blob encode/decode).
 //! - `native`: only the native games (vanilla), e.g. under `valgrind --tool=callgrind`.
 //!
@@ -27,6 +28,7 @@ fn main() {
     match mode {
         "compare" => bench::bench(n, seed, &teams),
         "breakdown" => {
+            #[cfg(feature = "pkmn")]
             bench::breakdown_pkmn(n, seed, &teams, 5);
             bench::breakdown(n, seed, &teams, kanto_gen1::Compat::Vanilla, 5);
             bench::breakdown(n, seed, &teams, kanto_gen1::Compat::Pkmn, 5);

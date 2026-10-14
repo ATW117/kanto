@@ -1,5 +1,6 @@
 //! Speed benchmark (native vs pkmn/engine, single-threaded, same random games) and the fast
-//! differential check against pkmn/engine.
+//! differential check against pkmn/engine. Everything that touches pkmn/engine needs the `pkmn`
+//! feature.
 //!
 //! Both engines are driven by the same policy: a uniform choice among the *env actions*
 //! (`Move(k)` / `Switch(team slot)`, sorted by action index) from a per-game choice RNG. If the
@@ -7,9 +8,16 @@
 //! is what the differential mode checks (turn count, winner and every Pokémon's HP and status after
 //! every update).
 
-use kanto_env::backend::{Action, Backend};
+use kanto_env::backend::Action;
+#[cfg(feature = "pkmn")]
+use kanto_env::backend::Backend;
+#[cfg(feature = "pkmn")]
 use kanto_env::memory::Memory;
+#[cfg(feature = "pkmn")]
+use kanto_env::pkmn_sys;
+#[cfg(feature = "pkmn")]
 use kanto_env::obs::View;
+#[cfg(feature = "pkmn")]
 use kanto_env::pkmn1::{Gen1Battle, Pkmn1};
 use kanto_env::rng::{derive_seed, Rng};
 use kanto_env::team::{Team, TeamSource};
@@ -45,11 +53,13 @@ impl Idx {
     }
 }
 
+#[cfg(feature = "pkmn")]
 /// One game on libpkmn without logging (pkmn's own fast path). Returns (turns, updates, winner).
 fn play_pkmn(b: &mut Gen1Battle, seed: u64, on_update: impl FnMut(&Gen1Battle)) -> (u32, u64, u8) {
     play_pkmn_c(b, seed, on_update, |_, _| {})
 }
 
+#[cfg(feature = "pkmn")]
 fn play_pkmn_c(b: &mut Gen1Battle, seed: u64, mut on_update: impl FnMut(&Gen1Battle), mut on_choice: impl FnMut(Action, Action)) -> (u32, u64, u8) {
     let mut rng = Rng::new(seed);
     let mut ch = [0u8; 16];
@@ -136,26 +146,35 @@ pub fn bench(n: usize, seed: u64, teams: &str) {
     println!("== bench: {n} random games (teams={teams}), single thread, uniform random actions");
     // Warm up caches/branch predictors briefly.
     for g in gs.iter().take(50) {
-        let mut b = Pkmn1::new_battle(&g.0, &g.1, g.2);
-        play_pkmn(&mut b, g.3, |_| {});
+        #[cfg(feature = "pkmn")]
+        play_pkmn(&mut Pkmn1::new_battle(&g.0, &g.1, g.2), g.3, |_| {});
         let mut nb = kanto_backend::new_battle(&g.0, &g.1, g.2, Rules::OU);
         play_native(&mut nb, g.3, |_| {});
     }
+    let mut runs: Vec<(&str, Option<Compat>)> = Vec::new();
+    #[cfg(feature = "pkmn")]
+    runs.push(("pkmn/engine (libpkmn, -Dshowdown, no log)", None));
+    runs.push(("native (vanilla Showdown)", Some(Compat::Vanilla)));
+    runs.push(("native (pkmn-patched Showdown)", Some(Compat::Pkmn)));
     let mut results = Vec::new();
-    for (name, compat) in [("pkmn/engine (libpkmn, -Dshowdown, no log)", None), ("native (vanilla Showdown)", Some(Compat::Vanilla)), ("native (pkmn-patched Showdown)", Some(Compat::Pkmn))] {
+    for (name, compat) in runs {
         let starts_native: Vec<Battle> = gs
             .iter()
             .map(|g| kanto_backend::new_battle(&g.0, &g.1, g.2, Rules { compat: compat.unwrap_or_default(), ..Rules::OU }))
             .collect();
+        #[cfg(feature = "pkmn")]
         let starts_pkmn: Vec<Gen1Battle> = gs.iter().map(|g| Pkmn1::new_battle(&g.0, &g.1, g.2)).collect();
         let t0 = Instant::now();
         let (mut turns, mut updates) = (0u64, 0u64);
         for (i, g) in gs.iter().enumerate() {
             let (t, u, _) = match compat {
+                #[cfg(feature = "pkmn")]
                 None => {
                     let mut b = starts_pkmn[i];
                     play_pkmn(&mut b, g.3, |_| {})
                 }
+                #[cfg(not(feature = "pkmn"))]
+                None => unreachable!(),
                 Some(_) => {
                     let mut b = starts_native[i];
                     play_native(&mut b, g.3, |_| {})
@@ -172,10 +191,19 @@ pub fn bench(n: usize, seed: u64, teams: &str) {
         );
         results.push(turns as f64 / secs);
     }
-    println!("  native/pkmn speed ratio: {:.2}x (vanilla), {:.2}x (pkmn-patched)", results[1] / results[0], results[2] / results[0]);
-    println!("  state size: native {} bytes, pkmn {} bytes", std::mem::size_of::<Battle>(), pkmn_sys::GEN1_BATTLE_SIZE);
+    #[cfg(feature = "pkmn")]
+    {
+        println!("  native/pkmn speed ratio: {:.2}x (vanilla), {:.2}x (pkmn-patched)", results[1] / results[0], results[2] / results[0]);
+        println!("  state size: native {} bytes, pkmn {} bytes", std::mem::size_of::<Battle>(), pkmn_sys::GEN1_BATTLE_SIZE);
+    }
+    #[cfg(not(feature = "pkmn"))]
+    {
+        let _ = results;
+        println!("  state size: native {} bytes (build with --features pkmn to compare against pkmn/engine)", std::mem::size_of::<Battle>());
+    }
 }
 
+#[cfg(feature = "pkmn")]
 /// Per-update fingerprint: turn, each side's active slot, and every Pokémon's (hp, status
 /// category) from the env view.
 fn fingerprint(v: &View) -> Vec<(u16, u8)> {
@@ -192,6 +220,7 @@ fn fingerprint(v: &View) -> Vec<(u16, u8)> {
 }
 
 /// Sorted env action indices of a player's legal choices.
+#[cfg(feature = "pkmn")]
 fn pkmn_actions(b: &Gen1Battle, p: usize) -> Vec<usize> {
     let mut ch = [0u8; 16];
     let n = Pkmn1::choices(b, p, &mut ch);
@@ -200,6 +229,7 @@ fn pkmn_actions(b: &Gen1Battle, p: usize) -> Vec<usize> {
     v
 }
 
+#[cfg(feature = "pkmn")]
 fn native_actions(b: &Battle, p: usize) -> Vec<usize> {
     use kanto_core::Generation;
     let mut ch = [Choice::Pass; 16];
@@ -209,6 +239,7 @@ fn native_actions(b: &Battle, p: usize) -> Vec<usize> {
     v
 }
 
+#[cfg(feature = "pkmn")]
 /// Differential test against pkmn/engine: step both engines in lockstep on the same games. Each
 /// player's action is drawn uniformly from the actions *both* engines allow (Showdown 0.11.11
 /// offers a single "Fight" option to a sleeping/frozen Pokémon where pkmn's older Showdown
@@ -427,6 +458,7 @@ pub fn breakdown(n: usize, seed: u64, teams: &str, compat: Compat, reps: usize) 
     println!("  from_bytes+validate: {:7.1} ns         (restore_state)", ns(from_bytes, sample.len()));
 }
 
+#[cfg(feature = "pkmn")]
 /// The same ablation for pkmn/engine (libpkmn without logging): update only, choices, copy.
 pub fn breakdown_pkmn(n: usize, seed: u64, teams: &str, reps: usize) {
     use std::hint::black_box;

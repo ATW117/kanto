@@ -1,4 +1,4 @@
-"""Fast batched Gen 1 singles environment (pkmn/engine or the native Showdown-exact simulator).
+"""kanto: a Showdown-exact Gen 1 battle simulator with a fast batched environment.
 
 See docs/DESIGN.md for the API contract and docs/OBSERVATION.md for the observation layout.
 
@@ -20,6 +20,7 @@ import numpy as np
 
 from . import _kanto as _native
 from ._kanto import (
+    BACKENDS,
     MAX_TURNS,
     MOVE_UNKNOWN,
     NUM_ACTIONS,
@@ -38,6 +39,7 @@ from ._kanto import (
 )
 
 __all__ = [
+    "BACKENDS",
     "VecEnv",
     "ProtocolBattle",
     "ProtocolTeams",
@@ -101,11 +103,11 @@ class VecEnv:
         max_turns: games reaching this turn end as truncated ties.
         reveal_hidden: debug only; fill the privileged observation block with the own side's
             hidden counters (sleep/confusion/disable turns left, Substitute HP, Toxic counter).
-        backend: battle simulator. ``"pkmn"`` (default): pkmn/engine in Showdown compatibility
-            mode (which enforces Sleep and Freeze Clause Mod). ``"native"``: the native Rust
-            simulator, matching vanilla Pokémon Showdown 0.11.11 ``[Gen 1] OU`` mechanics
-            (Sleep and Freeze Clause Mod; docs/SIM_DESIGN.md). ``"native-nc"``: native
-            without the clauses.
+        backend: battle simulator. ``"native"`` (default): kanto's Rust simulator, matching
+            vanilla Pokémon Showdown 0.11.11 ``[Gen 1] OU`` exactly (Sleep and Freeze Clause
+            Mod; docs/SIM_DESIGN.md). ``"native-nc"``: the same without the clauses.
+            ``"pkmn"``: pkmn/engine in Showdown compatibility mode, only in builds with the
+            ``pkmn`` feature (``BACKENDS`` lists what this build has).
         validate: check pool teams for Gen 1 legality: Species Clause (no duplicate species)
             and learnsets. ``False`` allows such teams. Unknown names, out-of-range DVs/levels
             and malformed teams are always errors.
@@ -120,7 +122,7 @@ class VecEnv:
         opponent: Optional[str] = None,
         max_turns: int = MAX_TURNS,
         reveal_hidden: bool = False,
-        backend: str = "pkmn",
+        backend: str = "native",
         validate: bool = True,
     ) -> None:
         self._env = _native.VecEnv(

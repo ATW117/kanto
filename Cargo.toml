@@ -1,6 +1,26 @@
 [workspace]
 resolver = "2"
-members = ["crates/pkmn-sys", "crates/kanto-env", "crates/kanto-py", "crates/kanto-core", "crates/kanto-data", "crates/kanto-gen1", "crates/kanto-backend", "crates/kanto-parity"]
+members = [
+    "crates/kanto-core",
+    "crates/kanto-data",
+    "crates/kanto-gen1",
+    "crates/kanto-env",
+    "crates/kanto-backend",
+    "crates/kanto-parity",
+    "crates/kanto-py",
+    "crates/pkmn-sys",
+]
+# pkmn-sys (the optional pkmn/engine backend) needs Zig 0.16 and the submodule, so plain `cargo
+# build` / `cargo test` leave it out. `cargo test --workspace --all-features` includes it.
+default-members = [
+    "crates/kanto-core",
+    "crates/kanto-data",
+    "crates/kanto-gen1",
+    "crates/kanto-env",
+    "crates/kanto-backend",
+    "crates/kanto-parity",
+    "crates/kanto-py",
+]
 
 [workspace.package]
 version = "0.1.0"

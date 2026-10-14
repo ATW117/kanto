@@ -11,15 +11,32 @@ mod proto;
 use kanto_env::backend::NUM_ACTIONS;
 use kanto_env::env::EnvConfig;
 use kanto_env::obs::{self, OBS_DIM, OBS_VERSION};
-use kanto_env::{data, Opponent, Pkmn1, StepOut, TeamSource};
+#[cfg(feature = "pkmn")]
+use kanto_env::Pkmn1;
+use kanto_env::{data, Opponent, StepOut, TeamSource};
 use kanto_backend::{Native1, Native1Nc};
 use numpy::{PyArray1, PyArray2, PyArray3, PyArrayMethods, PyReadonlyArray2, PyUntypedArrayMethods};
 use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
+/// The simulator backends compiled into this build.
+#[cfg(feature = "pkmn")]
+const BACKENDS: &[&str] = &["native", "native-nc", "pkmn"];
+#[cfg(not(feature = "pkmn"))]
+const BACKENDS: &[&str] = &["native", "native-nc"];
+
+fn backend_error(b: &str) -> String {
+    if b == "pkmn" {
+        "backend 'pkmn' is not compiled in: rebuild with `maturin develop --release --features pkmn` (needs Zig 0.16)".into()
+    } else {
+        format!("unknown backend '{b}' (available: {})", BACKENDS.join(", "))
+    }
+}
+
 /// The env, monomorphised per simulator backend.
 enum Inner {
+    #[cfg(feature = "pkmn")]
     Pkmn(kanto_env::VecEnv<Pkmn1>),
     Native(kanto_env::VecEnv<Native1>),
     NativeNc(kanto_env::VecEnv<Native1Nc>),
@@ -29,6 +46,7 @@ enum Inner {
 macro_rules! with_inner {
     ($inner:expr, $v:ident => $body:expr) => {
         match $inner {
+            #[cfg(feature = "pkmn")]
             Inner::Pkmn($v) => $body,
             Inner::Native($v) => $body,
             Inner::NativeNc($v) => $body,
@@ -39,10 +57,11 @@ macro_rules! with_inner {
 impl Inner {
     fn new(backend: &str, n: usize, seed: u64, source: TeamSource, cfg: EnvConfig, threads: usize) -> Result<Inner, String> {
         Ok(match backend {
+            #[cfg(feature = "pkmn")]
             "pkmn" => Inner::Pkmn(kanto_env::VecEnv::new(n, seed, source, cfg, threads)),
             "native" => Inner::Native(kanto_env::VecEnv::new(n, seed, source, cfg, threads)),
             "native-nc" => Inner::NativeNc(kanto_env::VecEnv::new(n, seed, source, cfg, threads)),
-            b => return Err(format!("unknown backend '{b}' (expected 'pkmn', 'native' or 'native-nc')")),
+            b => return Err(backend_error(b)),
         })
     }
     fn num_envs(&self) -> usize {
@@ -71,7 +90,7 @@ struct VecEnv {
 #[pymethods]
 impl VecEnv {
     #[new]
-    #[pyo3(signature = (num_envs, seed=0, teams="data/teams/gen1ou", threads=16, opponent=None, max_turns=1000, reveal_hidden=false, backend="pkmn", validate=true))]
+    #[pyo3(signature = (num_envs, seed=0, teams="data/teams/gen1ou", threads=16, opponent=None, max_turns=1000, reveal_hidden=false, backend="native", validate=true))]
     fn new(
         py: Python<'_>,
         num_envs: usize,
@@ -91,10 +110,11 @@ impl VecEnv {
         let opponent = opponent.map(Opponent::parse).transpose().map_err(PyValueError::new_err)?;
         let cfg = EnvConfig { max_turns, opponent, reveal_hidden };
         let backend: &'static str = match backend {
+            #[cfg(feature = "pkmn")]
             "pkmn" => "pkmn",
             "native" => "native",
             "native-nc" => "native-nc",
-            b => return Err(PyValueError::new_err(format!("unknown backend '{b}' (expected 'pkmn', 'native' or 'native-nc')"))),
+            b => return Err(PyValueError::new_err(backend_error(b))),
         };
         let inner = py.detach(|| Inner::new(backend, num_envs, seed, source, cfg, threads)).map_err(PyValueError::new_err)?;
         let n = num_envs;
@@ -222,7 +242,7 @@ impl VecEnv {
         NUM_ACTIONS
     }
 
-    /// The simulator backend: "pkmn", "native" or "native-nc".
+    /// The simulator backend: "native", "native-nc" or "pkmn".
     #[getter]
     fn backend(&self) -> &'static str {
         self.backend
@@ -302,14 +322,15 @@ fn move_names() -> Vec<&'static str> {
 
 /// Engine-only benchmark: `(seconds, updates, turns)` for `battles` random games.
 #[pyfunction]
-#[pyo3(signature = (battles, threads=1, teams="builtin", seed=0, backend="pkmn"))]
+#[pyo3(signature = (battles, threads=1, teams="builtin", seed=0, backend="native"))]
 fn bench_engine(py: Python<'_>, battles: usize, threads: usize, teams: &str, seed: u64, backend: &str) -> PyResult<(f64, u64, u64)> {
     let source = TeamSource::from_spec(teams).map_err(PyValueError::new_err)?;
     match backend {
+        #[cfg(feature = "pkmn")]
         "pkmn" => Ok(py.detach(|| kanto_env::bench::engine_only_with::<Pkmn1>(&source, battles, threads, seed))),
         "native" => Ok(py.detach(|| kanto_env::bench::engine_only_with::<Native1>(&source, battles, threads, seed))),
         "native-nc" => Ok(py.detach(|| kanto_env::bench::engine_only_with::<Native1Nc>(&source, battles, threads, seed))),
-        b => Err(PyValueError::new_err(format!("unknown backend '{b}'"))),
+        b => Err(PyValueError::new_err(backend_error(b))),
     }
 }
 
@@ -318,6 +339,7 @@ fn _kanto(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<VecEnv>()?;
     m.add_class::<proto::ProtocolBattle>()?;
     m.add_class::<proto::ProtocolTeams>()?;
+    m.add("BACKENDS", BACKENDS.to_vec())?;
     m.add("OBS_DIM", OBS_DIM)?;
     m.add("OBS_VERSION", OBS_VERSION)?;
     m.add("NUM_ACTIONS", NUM_ACTIONS)?;

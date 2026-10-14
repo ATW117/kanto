@@ -2,6 +2,7 @@ from typing import Any, Optional
 
 import numpy as np
 
+BACKENDS: list[str]
 OBS_DIM: int
 OBS_VERSION: int
 NUM_ACTIONS: int
@@ -29,7 +30,7 @@ class VecEnv:
         opponent: Optional[str] = None,
         max_turns: int = 1000,
         reveal_hidden: bool = False,
-        backend: str = "pkmn",
+        backend: str = "native",
         validate: bool = True,
     ) -> None: ...
     def reset(self, seed: Optional[int] = None) -> tuple[np.ndarray, np.ndarray]: ...
@@ -45,5 +46,5 @@ def id_offsets() -> list[tuple[int, str]]: ...
 def species_names() -> list[str]: ...
 def move_names() -> list[str]: ...
 def bench_engine(
-    battles: int, threads: int = 1, teams: str = "builtin", seed: int = 0, backend: str = "pkmn"
+    battles: int, threads: int = 1, teams: str = "builtin", seed: int = 0, backend: str = "native"
 ) -> tuple[float, int, int]: ...

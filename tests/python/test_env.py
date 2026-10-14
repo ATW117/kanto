@@ -193,6 +193,13 @@ def test_unknown_backend_rejected():
         pe.VecEnv(num_envs=1, backend="nope")
 
 
+def test_backends_listed():
+    assert {"native", "native-nc"} <= set(pe.BACKENDS)
+    if "pkmn" not in pe.BACKENDS:
+        with pytest.raises(ValueError, match="features pkmn"):
+            pe.VecEnv(num_envs=1, backend="pkmn")
+
+
 # ---- Robustness ------------------------------------------------------------------------------
 
 CRASH_TEAMS = (
@@ -244,6 +251,8 @@ def test_panic_is_isolated_per_env():
 
 @pytest.mark.parametrize("backend", ["pkmn", "native"])
 def test_opp_action_obs_frame(backend):
+    if backend not in pe.BACKENDS:
+        pytest.skip(f"{backend} backend not compiled in")
     n = 64
     env = pe.VecEnv(num_envs=n, seed=3, teams="data/teams/gen1ou", threads=2, backend=backend)
     _, mask = env.reset()

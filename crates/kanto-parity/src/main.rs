@@ -117,9 +117,15 @@ fn main() {
         "regen" => regen(&args),
         "proto-corpus" => proto_corpus(&args),
         "bench" => bench::bench(args.num("battles", 2000) as usize, args.num("seed", 1), &args.get("teams", "randbats")),
+        #[cfg(feature = "pkmn")]
         "diff-pkmn" => {
             let compat = if args.get("compat", "pkmn") == "vanilla" { kanto_gen1::Compat::Vanilla } else { kanto_gen1::Compat::Pkmn };
             bench::diff_pkmn(args.num("battles", 2000) as usize, args.num("seed", 1), &args.get("teams", "randbats"), compat, args.flag("verbose"));
+        }
+        #[cfg(not(feature = "pkmn"))]
+        "diff-pkmn" => {
+            eprintln!("diff-pkmn needs the pkmn feature: cargo run --release -p kanto-parity --features pkmn --bin parity -- diff-pkmn");
+            std::process::exit(2);
         }
         _ => {
             eprintln!("usage: parity fuzz|replay|fixtures|bench ... (see crates/kanto-parity/src/main.rs)");

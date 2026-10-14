@@ -4,7 +4,7 @@
 2. Full env: VecEnv.step with random legal actions for both players, including protocol-log
    parsing, reveal memory, observation encoding into numpy and masks.
 
-Usage: python bench/bench.py [--quick] [--teams PATH] [--backend pkmn,native] [--envs 4096]
+Usage: python bench/bench.py [--quick] [--teams PATH] [--backend native,pkmn] [--envs 4096]
                              [--threads 16] [--env-only]
 """
 
@@ -62,7 +62,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--teams", default="data/teams/gen1ou")
     ap.add_argument("--quick", action="store_true", help="shorter runs")
-    ap.add_argument("--backend", default="pkmn", help="comma-separated: pkmn, native, native-nc")
+    ap.add_argument("--backend", default="native", help="comma-separated: native, native-nc, pkmn (pkmn needs the pkmn feature)")
     ap.add_argument("--envs", default="256,1024,4096", help="comma-separated VecEnv sizes")
     ap.add_argument("--threads", default="1,4,16", help="comma-separated thread counts")
     ap.add_argument("--env-only", action="store_true", help="skip the engine-only benchmark")

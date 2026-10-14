@@ -1,13 +1,16 @@
-//! Engine-only throughput: random self-play straight through libpkmn (no logs, observations or
-//! masks), mirroring pkmn's own benchmark. Used by bench/bench.py.
+//! Engine-only throughput: random self-play through a backend (no logs, observations or masks).
+//! [`engine_only`] goes straight through libpkmn, mirroring pkmn's own benchmark (`pkmn`
+//! feature). Used by bench/bench.py.
 
 use crate::backend::Backend;
+#[cfg(feature = "pkmn")]
 use crate::pkmn1::{Gen1Battle, Pkmn1};
 use crate::rng::{derive_seed, Rng};
 use crate::team::TeamSource;
 use rayon::prelude::*;
 use std::time::Instant;
 
+#[cfg(feature = "pkmn")]
 /// Play `battles` random games on `threads` threads; returns (seconds, total updates, total turns).
 /// Teams are sampled before timing starts.
 pub fn engine_only(source: &TeamSource, battles: usize, threads: usize, seed: u64) -> (f64, u64, u64) {
@@ -31,6 +34,7 @@ pub fn engine_only(source: &TeamSource, battles: usize, threads: usize, seed: u6
     (t0.elapsed().as_secs_f64(), updates, turns)
 }
 
+#[cfg(feature = "pkmn")]
 fn play(b: &mut Gen1Battle, seed: u64) -> (u64, u64) {
     let mut rng = Rng::new(seed);
     let mut choices = [0u8; 16];
