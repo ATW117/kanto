@@ -167,8 +167,112 @@ impl<B: Backend> Env<B> {
 
     /// Pick player 2's action with the built-in opponent.
     pub fn opponent_action(&mut self, kind: Opponent) -> usize {
-        let view = (kind == Opponent::MaxDamage).then(|| B::view(&self.battle));
-        opponent::pick(kind, view.as_ref(), 1, &self.mask[1], &mut self.rng)
+        self.builtin_action(kind, 1)
+    }
+
+    /// The built-in policy `kind`'s action for `player` (uses this env's RNG).
+    pub fn builtin_action(&mut self, kind: Opponent, player: usize) -> usize {
+        match kind {
+            Opponent::Lookahead => self.lookahead_action(player, opponent::LOOKAHEAD_SAMPLES),
+            Opponent::MaxDamage => {
+                let view = B::view(&self.battle);
+                opponent::pick(kind, Some(&view), player, &self.mask[player], &mut self.rng)
+            }
+            Opponent::Random => opponent::pick(kind, None, player, &self.mask[player], &mut self.rng),
+        }
+    }
+
+    /// One-turn simultaneous-move search for `player` (see `Opponent::Lookahead`).
+    pub fn lookahead_action(&mut self, player: usize, samples: u32) -> usize {
+        let me = player;
+        let op = 1 - player;
+        let legal = |m: &[bool; NUM_ACTIONS]| {
+            let mut a = [0usize; NUM_ACTIONS];
+            let mut n = 0;
+            for (i, &ok) in m.iter().enumerate() {
+                if ok {
+                    a[n] = i;
+                    n += 1;
+                }
+            }
+            (a, n)
+        };
+        let (mine, n) = legal(&self.mask[me]);
+        let (theirs, m) = legal(&self.mask[op]);
+        if n <= 1 {
+            return mine[0];
+        }
+        let mut pay = [[0f32; NUM_ACTIONS]; NUM_ACTIONS];
+        let samples = samples.max(1);
+        let win = 20.0;
+        for i in 0..n {
+            for j in 0..m {
+                let (cm, co) = (self.table[me][mine[i]], self.table[op][theirs[j]]);
+                let (c1, c2) = if me == 0 { (cm, co) } else { (co, cm) };
+                let mut tot = 0.0;
+                for _ in 0..samples {
+                    let mut b = self.battle;
+                    B::reseed(&mut b, self.rng.next_u64());
+                    let mut mem = self.mem;
+                    let o = B::update(&mut b, c1, c2, &mut mem);
+                    tot += match o {
+                        Outcome::P1Win => if me == 0 { win } else { -win },
+                        Outcome::P2Win => if me == 0 { -win } else { win },
+                        Outcome::Tie => 0.0,
+                        Outcome::Ongoing => opponent::position_value(&B::view(&b), me),
+                    };
+                }
+                pay[i][j] = tot / samples as f32;
+            }
+        }
+        let mut s = opponent::regret_matching(&pay, n, m, opponent::LOOKAHEAD_RM_ITERS);
+        // Drop negligible probabilities, then sample.
+        if s[..n].iter().any(|&p| p >= 0.05) {
+            for p in &mut s[..n] {
+                if *p < 0.05 {
+                    *p = 0.0;
+                }
+            }
+        }
+        let tot: f32 = s[..n].iter().sum();
+        let mut u = (self.rng.next_u64() >> 40) as f32 / (1u64 << 24) as f32 * tot;
+        for i in 0..n {
+            if u < s[i] {
+                return mine[i];
+            }
+            u -= s[i];
+        }
+        mine[(0..n).max_by(|&a, &b| s[a].total_cmp(&s[b])).unwrap()]
+    }
+
+    /// Privileged targets for the hidden-information auxiliary head, from player `obs`'s point of
+    /// view (labels only; never part of the observation). `species[j]`/`moves[4j..4j+4]` describe
+    /// the opponent Pokémon in appearance-order slot `j` for `j < n_revealed`, then the unrevealed
+    /// party members (in party order) fill the remaining slots up to the team size; 0 = empty.
+    /// `moves` are the Pokémon's true (original) move ids.
+    pub fn opp_team_targets(&self, obs: usize, species: &mut [u8], moves: &mut [u8]) {
+        let v = B::view(&self.battle);
+        let side = &v.sides[1 - obs];
+        let mem = &self.mem[obs];
+        species[..6].fill(0);
+        moves[..24].fill(0);
+        let nrev = (mem.n_revealed as usize).min(6);
+        let mut j = 0usize;
+        let mut put = |k: usize, j: &mut usize| {
+            if *j < 6 && k < 6 {
+                species[*j] = side.mons[k].species;
+                moves[4 * *j..4 * *j + 4].copy_from_slice(&side.mons[k].moves);
+                *j += 1;
+            }
+        };
+        for s in 0..nrev {
+            put(mem.reveal_order[s] as usize, &mut j);
+        }
+        for k in 0..(side.size as usize).min(6) {
+            if mem.slot_of[k] == crate::memory::UNREVEALED {
+                put(k, &mut j);
+            }
+        }
     }
 
     /// Play one update. Actions must be legal (check with `is_legal` first). Auto-resets when

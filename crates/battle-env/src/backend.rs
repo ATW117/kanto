@@ -71,6 +71,10 @@ pub trait Backend: Send + Sync + 'static {
         0
     }
 
+    /// Replace the battle's RNG state with one derived from `seed` (search: sampling different
+    /// futures from a cloned battle). Default: no-op (the clone replays the same RNG stream).
+    fn reseed(_b: &mut Self::Battle, _seed: u64) {}
+
     /// Play one update with both players' choices; updates both players' reveal memories from
     /// the battle log (memory `p` belongs to player `p` and tracks what it has seen).
     fn update(b: &mut Self::Battle, c1: Self::Choice, c2: Self::Choice, mem: &mut [Memory; 2]) -> Outcome;
