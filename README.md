@@ -126,6 +126,12 @@ out = pb.step("move 2", "switch 3")
 obs, mask = pb.observe(0)   # the same battle as env observations
 ```
 
+**Playing on a Showdown server.** `ClientBattle` goes the other way: it rebuilds a player's env
+observation and action mask from the messages a Showdown server sends that player, so an agent
+trained on `VecEnv` can play on a real server. It matches the env at every step except where the
+env shows Gen 1 partial trapping's hidden duration (99.78% of steps exact over 3,000 battles). See
+[docs/CLIENT.md](docs/CLIENT.md).
+
 **Observations and actions.** 10 actions: 4 move slots and 6 switch targets (by original team
 slot), with a legality mask. The 752-float observation holds only what a Showdown player can see
 (the opponent's unrevealed Pokémon and moves are unknown, HP is a percentage).

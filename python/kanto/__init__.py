@@ -22,6 +22,7 @@ from . import _kanto as _native
 from ._kanto import (
     BACKENDS,
     MAX_TURNS,
+    ClientBattle,
     MOVE_UNKNOWN,
     NUM_ACTIONS,
     OBS_DIM,
@@ -43,6 +44,7 @@ __all__ = [
     "VecEnv",
     "ProtocolBattle",
     "ProtocolTeams",
+    "ClientBattle",
     "OBS_DIM",
     "OBS_VERSION",
     "NUM_ACTIONS",

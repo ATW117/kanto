@@ -6,6 +6,7 @@
 
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
+mod client;
 mod proto;
 
 use kanto_env::backend::NUM_ACTIONS;
@@ -339,6 +340,7 @@ fn _kanto(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<VecEnv>()?;
     m.add_class::<proto::ProtocolBattle>()?;
     m.add_class::<proto::ProtocolTeams>()?;
+    m.add_class::<client::ClientBattle>()?;
     m.add("BACKENDS", BACKENDS.to_vec())?;
     m.add("OBS_DIM", OBS_DIM)?;
     m.add("OBS_VERSION", OBS_VERSION)?;

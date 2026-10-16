@@ -6,6 +6,7 @@
 
 pub mod backend;
 pub mod bench;
+pub mod client;
 pub mod data;
 pub mod env;
 pub mod memory;
