@@ -166,3 +166,56 @@ fn client_matches_env() {
     assert_eq!(bad_steps, 0);
     assert!(hidden_steps * 100 < steps, "partial-trapping estimates differ too often");
 }
+
+/// Live servers also send room messages (chat, joins, timer notices) and may send the battle
+/// header before `|start|` as its own message: none of them is an update.
+#[test]
+fn client_ignores_room_messages() {
+    let source = pool();
+    for seed in 0..100u64 {
+        let mut rng = Rng::new(seed);
+        let (p1, p2) = (source.sample(&mut rng), source.sample(&mut rng));
+        let b = kanto_backend::new_battle(&p1, &p2, rng.next_u64(), kanto_gen1::Rules::OU);
+        let mut g = kanto_backend::ProtoGame::new(b, ["p1", "p2"]);
+        let mut cl = [ClientBattle::new("p1"), ClientBattle::new("p2")];
+        let mut out = g.start();
+        let mut arng = Rng::new(seed ^ 0x5eed);
+        let mut first = true;
+        for _ in 0..1000 {
+            for p in 0..2 {
+                let view = out.view(p as i32 + 1);
+                cl[p].feed("|j| someone\n|c|someone|good luck").unwrap();
+                if let Some(r) = &out.requests[p] {
+                    cl[p].feed(&format!("|request|{r}")).unwrap();
+                }
+                if first {
+                    let k = view.iter().position(|l| l == "|start|" || l == "|start").unwrap_or(0);
+                    cl[p].feed(&format!("|init|battle\n|title|p1 vs. p2\n{}", view[..k].join("\n"))).unwrap();
+                    cl[p].feed(&view[k..].join("\n")).unwrap();
+                } else {
+                    cl[p].feed(&view.join("\n")).unwrap();
+                }
+                cl[p].feed("|inactive|Battle timer is ON: inactive players will automatically lose when time's up.").unwrap();
+                cl[p].flush();
+            }
+            first = false;
+            if g.battle().ended {
+                break;
+            }
+            for p in 0..2 {
+                let (mut want, mut got) = (vec![0f32; OBS_DIM], vec![0f32; OBS_DIM]);
+                g.observe(p, &mut want);
+                cl[p].observe(&mut got);
+                for k in 0..OBS_DIM {
+                    if want[k] != got[k] && !HIDDEN.contains(&field(k).as_str()) {
+                        panic!("seed {seed} player {}: {} want {} got {}", p + 1, field(k), want[k], got[k]);
+                    }
+                }
+                assert_eq!(cl[p].mask(), g.mask[p], "seed {seed}: masks differ");
+            }
+            let a1 = pick(&g.mask[0], &mut arng);
+            let a2 = pick(&g.mask[1], &mut arng);
+            out = g.step_actions(a1, a2).unwrap();
+        }
+    }
+}

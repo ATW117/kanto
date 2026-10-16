@@ -53,6 +53,16 @@ fn boost_index(s: &str) -> Option<usize> {
     })
 }
 
+/// A battle-log event line (as opposed to room, chat, timer and header lines).
+fn is_event(line: &str) -> bool {
+    let cmd = line.split('|').nth(1).unwrap_or("");
+    cmd.starts_with('-')
+        || matches!(
+            cmd,
+            "start" | "switch" | "drag" | "replace" | "detailschange" | "move" | "cant" | "faint" | "turn" | "upkeep" | "win" | "tie"
+        )
+}
+
 fn set_bit(v: &mut u32, bit: u32, on: bool) {
     if on {
         *v |= bit;
@@ -217,15 +227,40 @@ impl ClientBattle {
                 log.push(line);
             }
         }
-        if log.iter().any(|l| l.len() > 1) {
+        // Only battle events make an update (one env step); room messages (chat, timer, the
+        // header before `|start|`) do not.
+        if log.iter().any(|l| is_event(l)) {
             let turn_before = self.turn;
             self.update(&log);
             self.flush();
             if self.started {
                 self.update_trackers(self.turn > turn_before && turn_before > 0);
             }
+        } else {
+            self.header(&log);
         }
         Ok(())
+    }
+
+    /// Header lines outside an update: the seat and team sizes.
+    fn header(&mut self, log: &[&str]) {
+        for line in log {
+            let parts: Vec<&str> = line.split('|').collect();
+            match parts.get(1).copied() {
+                Some("player") if parts.len() >= 4 => {
+                    if self.me.is_none() && !self.name.is_empty() && parts[3] == self.name {
+                        self.me = Some(if parts[2] == "p2" { 1 } else { 0 });
+                    }
+                }
+                Some("teamsize") if parts.len() >= 4 => {
+                    let p = if parts[2] == "p2" { 1 } else { 0 };
+                    if p != self.me() || self.view.sides[p].size == 0 {
+                        self.view.sides[p].size = parts[3].parse().unwrap_or(6);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Apply a request received without a following update (e.g. a resent request).

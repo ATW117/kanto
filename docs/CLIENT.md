@@ -24,6 +24,9 @@ for message in battle_room_messages:      # each server message for the battle r
   produces an observation at every step, including steps where a player only waits (its
   opponent's forced switch); `observe()` after such an update returns a pass-only mask
   (`[True, False, ...]`), exactly like the env.
+- **Room messages.** Only messages with battle events (moves, switches, `|turn|`, `-` lines, ...)
+  are updates. Chat, joins, timer notices and a header sent before `|start|` are not; the
+  header's `|player|` and `|teamsize|` lines are still read.
 - **Requests.** Showdown sends a player's `|request|` before the update it follows. `feed` keeps a
   request pending and applies it after the next update. `flush()` applies a pending request that
   no update follows (e.g. a resent request).
