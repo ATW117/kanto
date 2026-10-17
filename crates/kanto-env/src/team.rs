@@ -21,6 +21,9 @@ pub struct StatSpread {
 #[derive(Clone, Debug, Deserialize)]
 pub struct PokemonSet {
     pub species: String,
+    /// Optional nickname (`Pokemon#name` in Showdown's protocol); not part of [`Mon`].
+    #[serde(default)]
+    pub nickname: Option<String>,
     pub moves: Vec<String>,
     #[serde(default)]
     pub level: Option<u8>,
@@ -173,8 +176,12 @@ impl Team {
     }
 }
 
-/// Parse teams from a JSON string: a single team object, an array of teams, or JSON Lines.
+/// Parse teams from a string: JSON (a single team object, an array of teams, or JSON Lines) or a
+/// Showdown team (export text or packed, see [`crate::showdown_team`]).
 pub fn parse_teams(text: &str) -> Result<Vec<TeamSpec>, String> {
+    if crate::showdown_team::looks_like_showdown(text) {
+        return crate::showdown_team::parse_showdown_teams(text);
+    }
     let trimmed = text.trim_start();
     if trimmed.starts_with('[') {
         return serde_json::from_str(trimmed).map_err(|e| e.to_string());
@@ -190,7 +197,8 @@ pub fn parse_teams(text: &str) -> Result<Vec<TeamSpec>, String> {
         .collect()
 }
 
-/// Load all teams from a `.json`/`.jsonl` file or a directory of them (non-recursive), with the
+/// Load all teams from a `.json`/`.jsonl` file, a Showdown team file (`.txt` export or `.packed`,
+/// one team per line), or a directory of them (non-recursive), with the
 /// legality checks of [`Team::from_spec`].
 pub fn load_teams(path: &Path) -> Result<Vec<Team>, String> {
     load_teams_opts(path, true)
@@ -216,7 +224,7 @@ pub fn load_teams_opts(path: &Path, validate: bool) -> Result<Vec<Team>, String>
     if path.is_dir() {
         for entry in std::fs::read_dir(path).map_err(|e| format!("{}: {e}", path.display()))? {
             let p = entry.map_err(|e| e.to_string())?.path();
-            if matches!(p.extension().and_then(|e| e.to_str()), Some("json" | "jsonl")) {
+            if matches!(p.extension().and_then(|e| e.to_str()), Some("json" | "jsonl" | "txt" | "packed")) {
                 files.push(p);
             }
         }
@@ -241,6 +249,12 @@ pub fn load_teams_opts(path: &Path, validate: bool) -> Result<Vec<Team>, String>
 
 /// A few hand-written Gen 1 OU teams, used as a fallback/fixture until the curated pool lands.
 pub const BUILTIN_TEAMS_JSON: &str = include_str!("../../../tests/fixtures/teams/gen1ou_builtin.json");
+
+/// `data/teams/gen1ou/teams.jsonl` and its split, embedded (team sources `"gen1ou"`,
+/// `"gen1ou:train"`, `"gen1ou:eval"`).
+pub const POOL_GEN1OU: &str = include_str!("../../../data/teams/gen1ou/teams.jsonl");
+pub const POOL_GEN1OU_TRAIN: &str = include_str!("../../../data/teams/gen1ou/split/train.jsonl");
+pub const POOL_GEN1OU_EVAL: &str = include_str!("../../../data/teams/gen1ou/split/eval.jsonl");
 
 pub fn builtin_teams() -> Vec<Team> {
     parse_teams(BUILTIN_TEAMS_JSON)
@@ -275,6 +289,16 @@ impl TeamSource {
             "random" => Ok(TeamSource::RandomLegal),
             "randbats" => Ok(TeamSource::RandBats),
             "builtin" => Ok(TeamSource::Pool(builtin_teams())),
+            // The shipped pool, embedded so installed wheels (no repository checkout) have it.
+            "gen1ou" | "gen1ou:train" | "gen1ou:eval" => {
+                let text = match spec {
+                    "gen1ou" => POOL_GEN1OU,
+                    "gen1ou:train" => POOL_GEN1OU_TRAIN,
+                    _ => POOL_GEN1OU_EVAL,
+                };
+                let teams = parse_teams(text)?.iter().map(|t| Team::from_spec_opts(t, validate)).collect::<Result<Vec<_>, _>>()?;
+                Ok(TeamSource::Pool(teams))
+            }
             path => {
                 let file = split_path(path).unwrap_or_else(|| path.into());
                 Ok(TeamSource::Pool(load_teams_opts(&file, validate)?))
@@ -423,6 +447,11 @@ mod tests {
         let train_set: std::collections::HashSet<String> = train.iter().map(|t| format!("{t:?}")).collect();
         assert!(eval.iter().all(|t| !train_set.contains(&format!("{t:?}"))), "split overlaps");
         assert!(TeamSource::from_spec(&format!("{d}:test")).is_err());
+        // The embedded copies are the same pools.
+        for (name, files) in [("gen1ou", all), ("gen1ou:train", train), ("gen1ou:eval", eval)] {
+            let TeamSource::Pool(e) = TeamSource::from_spec(name).unwrap() else { panic!() };
+            assert_eq!(e, files, "{name}");
+        }
     }
 
     #[test]

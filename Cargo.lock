@@ -110,6 +110,7 @@ dependencies = [
  "kanto-gen1",
  "numpy",
  "pyo3",
+ "serde_json",
 ]
 
 [[package]]

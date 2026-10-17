@@ -17,6 +17,7 @@ pub mod pkmn1;
 pub mod protocol;
 pub mod reveal;
 pub mod rng;
+pub mod showdown_team;
 pub mod team;
 pub mod vec_env;
 

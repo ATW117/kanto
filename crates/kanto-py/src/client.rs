@@ -69,8 +69,8 @@ impl ClientBattle {
     /// are sampled from ``seed``. Raises ``ValueError`` for unsupported states (Transform, Bide,
     /// Mimic, active partial trapping) and when there is no decision to make.
     fn determinize<'py>(&self, py: Python<'py>, own_team: &str, opp_team: &str, seed: u64) -> PyResult<Bound<'py, PyBytes>> {
-        let own = crate::proto::parse_team(own_team, false)?;
-        let opp = crate::proto::parse_team(opp_team, false)?;
+        let (own, _) = crate::proto::parse_team(own_team, false)?;
+        let (opp, _) = crate::proto::parse_team(opp_team, false)?;
         let env = kanto_backend::determinize(&self.inner.snapshot(), &own, &opp, seed).map_err(PyValueError::new_err)?;
         Ok(PyBytes::new(py, &env.to_bytes()))
     }

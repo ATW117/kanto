@@ -6,8 +6,10 @@ fast batched environment for reinforcement learning and search.
 Given the same teams, seed and choices, kanto makes the same PRNG calls, reaches the same state and
 offers the same legal choices as [Pokémon Showdown](https://github.com/smogon/pokemon-showdown)
 0.11.11 `[Gen 1] OU`, at every decision. It can also write Showdown's text protocol (battle log,
-per-player views, `|request|` JSON) line for line, so Showdown bots can play it offline. It runs
-about 5 M turns/s on one core, roughly 1,000 times faster than Showdown itself.
+per-player views, `|request|` JSON) line for line, so Showdown bots can play it offline, and it
+can serve unmodified poke-env clients through a local Showdown-protocol server. Its engine runs
+about 5 M turns/s on one core (random self-play, no protocol text); Showdown, which always builds
+its text log, runs about 5 k.
 
 ```python
 import numpy as np, kanto
@@ -49,6 +51,19 @@ one-place mutants of the simulator, 55 are caught. Of the 7 survivors, 6 are arg
 a kanto-gen1 unit test catches it. Recorded Showdown battles in
 `parity/fixtures/` replay without Node in `cargo test`.
 
+Fuzzing is evidence, not proof: these are the battles that were compared, and rare states that no
+fuzzed battle reached could still differ. To check the numbers yourself:
+
+- `parity/reproduce.sh` re-runs the tables of docs/SIM_STATUS.md with their seeds; specs depend
+  only on the seed, so the battle and step counts must come out identical (they did on a re-run
+  on 2026-10-16).
+- Without the harness: `ProtocolBattle.input_log()` writes any kanto battle as a Showdown input
+  log, and `parity/showdown/inputlog.js` replays it through an unmodified Showdown `BattleStream`
+  (docs/SHOWDOWN_INTEROP.md). 3,000 random battles gave identical logs.
+- Newer Showdown: the harness also runs against Showdown master. On 2026-10-16 (master 7244fe8,
+  which changes no Gen 1 battle code since 0.11.11) 8,000 fuzzed battles / 570,484 steps, protocol
+  runs included, and the 3,000 input-log battles matched.
+
 ## Speed
 
 Single-threaded engine throughput: uniform-random self-play, `[Gen 1] OU`, the same games for both
@@ -72,8 +87,10 @@ node bench/showdown_bench.js $PS_DIR data/teams/gen1ou/teams.jsonl 2000
 python bench/bench.py --quick             # multi-threaded engine and VecEnv.step throughput
 ```
 
-At 16 threads, `VecEnv.step` with N = 4096 envs runs about 2.5 M env-steps/s, including
-observation encoding and masks.
+`VecEnv.step` with N = 4096 envs, including observation encoding and masks for both players,
+runs about 1.0 M env-steps/s on one thread and 2.8-3.1 M on 8 (`python bench/bench.py --env-only
+--envs 4096 --threads 1,8`, 2026-10-16). The observation encoder, not the simulator, is most of
+that cost.
 
 ## Install and build
 
@@ -132,18 +149,32 @@ trained on `VecEnv` can play on a real server. It matches the env at every step 
 env shows Gen 1 partial trapping's hidden duration (99.78% of steps exact over 3,000 battles). See
 [docs/CLIENT.md](docs/CLIENT.md).
 
+**Showdown tools.** Teams can be given in Showdown's export or packed format
+(`kanto.convert_team`, `kanto.validate_team` for `[Gen 1] OU` bans), `ProtocolBattle` takes
+Showdown seed strings, writes Showdown input logs and replay pages, and `python -m kanto.server`
+lets unmodified poke-env players battle each other on kanto with no Node server (about 2x the
+battles/s of a local Showdown server with poke-env clients). See
+[docs/SHOWDOWN_INTEROP.md](docs/SHOWDOWN_INTEROP.md).
+
 **Observations and actions.** 10 actions: 4 move slots and 6 switch targets (by original team
-slot), with a legality mask. The 752-float observation holds only what a Showdown player can see
-(the opponent's unrevealed Pokémon and moves are unknown, HP is a percentage).
+slot), with a legality mask. The 752-float observation holds what a Showdown player can see
+(the opponent's unrevealed Pokémon and moves are unknown, HP is a percentage), with one known
+exception: the partial-trapping flags and counter follow the simulator, so they reveal when a
+Wrap/Bind/Fire Spin/Clamp lock has silently ended (0.2% of steps; docs/CLIENT.md).
 [docs/OBSERVATION.md](docs/OBSERVATION.md) has the layout;
 [docs/OBSERVATION_RULES.md](docs/OBSERVATION_RULES.md) the visibility rules.
 
 ## Team data
 
-`teams=` accepts a `.json`/`.jsonl` file or directory of teams, `"data/teams/gen1ou:train"` /
+`teams=` accepts a `.json`/`.jsonl` file, a Showdown team file (`.txt` export or `.packed`) or a
+directory of them, `"data/teams/gen1ou:train"` /
 `":eval"` (`kanto.TEAMS_TRAIN` / `TEAMS_EVAL`, a deterministic 90/10 split), `"builtin"`,
 `"random"` (random legal learnsets) or `"randbats"` (Showdown's Gen 1 random-battle sets). Teams
-are checked for Gen 1 legality (Species Clause, learnsets, DVs) unless `validate=False`.
+are checked for Gen 1 legality (Species Clause, learnsets, DVs) unless `validate=False`; the
+`[Gen 1] OU` bans (Ubers, Dig/Fly, OHKO and Evasion Clauses) are checked by
+`kanto.validate_team`, which agrees with Showdown's validator on 99.5% of random level-100 teams
+and is never stricter (it lacks Showdown's event-legality checks). The pool is embedded in the
+extension, so `TEAMS_TRAIN`/`TEAMS_EVAL` also work from an installed wheel.
 
 `data/teams/gen1ou/teams.jsonl` holds 1,000 teams sampled from Smogon's aggregate Gen 1 OU usage
 statistics and validated by Showdown's own `TeamValidator`. Real ladder teams can be loaded the
@@ -190,13 +221,23 @@ tests/                  Rust, Python and C tests
 
 ## Limitations
 
-- Gen 1 singles only, `[Gen 1] OU` with or without Sleep and Freeze Clause Mod. The crates are
-  organised per generation (docs/SIM_DESIGN.md), but no other generation exists yet.
-- Parity is with pokemon-showdown 0.11.11. Later Showdown releases may change Gen 1 behaviour;
-  re-run the harness against them before relying on exactness.
+- Gen 1 singles only, `[Gen 1] OU` with or without Sleep and Freeze Clause Mod. Showdown's other
+  Gen 1 tiers (Ubers, UU, NU, PU, ZU) use the same battle rules but kanto's validator and header
+  only know OU; Random Battle battles are exact given the teams, but kanto's random-team
+  generator is not Showdown's; Stadium, Japanese OU, 1v1, LC and the Cup formats are not
+  supported. The crates are organised per generation (docs/SIM_DESIGN.md), but no other
+  generation exists yet.
+- Parity is with pokemon-showdown 0.11.11, and was re-checked against master 7244fe8
+  (2026-10-16). Later Showdown changes may affect Gen 1; re-run the harness before relying on
+  exactness. Live servers seed battles with fresh sodium seeds, so a ladder battle cannot be
+  replayed seed-for-seed unless its input log (with the seed) is exported.
 - Showdown 0.11.11 itself crashes ("moveSlot is null") in a rare sleep/freeze + Transform state.
   kanto does not crash there; it does what pkmn/engine does. Those battles have no ground truth.
-- No server: kanto does not produce room messages (`|init|`, `|j|`) or request ids.
+- `ProtocolBattle` emits battle messages only; room messages (`|init|`, `|j|`) and request ids
+  come from `kanto.server`, a development server (no authentication, ratings, spectators or
+  timer enforcement).
+- No PyPI release yet: installing builds the Rust extension from source (wheel workflow in
+  `.github/workflows/wheels.yml`, untested beyond Linux aarch64).
 
 ## Citation
 
