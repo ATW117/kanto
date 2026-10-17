@@ -23,6 +23,7 @@ Repository = "https://github.com/ATW117/kanto"
 
 [project.optional-dependencies]
 gym = ["gymnasium>=0.29"]
+server = ["websockets>=12"]
 test = ["pytest>=8", "gymnasium>=0.29"]
 
 [tool.maturin]
