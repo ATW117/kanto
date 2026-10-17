@@ -65,6 +65,7 @@ __all__ = [
     "id_offsets",
     "species_names",
     "move_names",
+    "replay_html",
 ]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -211,3 +212,27 @@ def ProtocolTeams(teams: str | os.PathLike[str] = "data/teams/gen1ou", validate:
     sampling both teams and the battle seed from ``seed`` the way ``VecEnv`` does. ``teams`` takes
     the same sources as ``VecEnv`` (e.g. ``TEAMS_EVAL``)."""
     return _native.ProtocolTeams(_resolve_teams(teams), validate)
+
+
+def replay_html(battle: "ProtocolBattle", title: Optional[str] = None) -> str:
+    """A finished (or running) battle as a Showdown replay page: the spectator log
+    (``battle.view_log(0)``) in the HTML format of Showdown's "download replay", which loads
+    play.pokemonshowdown.com's replay player when opened in a browser."""
+    import html
+
+    log = "\n".join(battle.view_log(0))
+    players = [l.split("|")[3] for l in battle.view_log(0) if l.startswith("|player|")][:2]
+    vs = " vs. ".join(players) if players else "kanto battle"
+    title = title or f"[Gen 1] OU replay: {vs}"
+    return (
+        "<!DOCTYPE html>\n<meta charset=\"utf-8\" />\n<!-- version 1 -->\n"
+        f"<title>{html.escape(title)}</title>\n"
+        "<div class=\"wrapper replay-wrapper\" style=\"max-width:1180px;margin:0 auto\">\n"
+        "<div class=\"battle\"></div><div class=\"battle-log\"></div>"
+        "<div class=\"replay-controls\"></div><div class=\"replay-controls-2\"></div>\n"
+        f"<h1 style=\"font-weight:normal;text-align:center\">{html.escape(vs)}</h1>\n"
+        "<script type=\"text/plain\" class=\"battle-log-data\">"
+        + log.replace("</", "<\\/")
+        + "</script>\n</div>\n"
+        "<script src=\"https://play.pokemonshowdown.com/js/replay-embed.js\"></script>\n"
+    )

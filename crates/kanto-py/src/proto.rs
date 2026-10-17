@@ -151,6 +151,16 @@ impl ProtocolBattle {
         out
     }
 
+    /// The whole log as one channel sees it (``extractChannelMessages``): ``-1`` omniscient,
+    /// ``0`` spectator (what a Showdown replay holds), ``1``/``2`` the players.
+    #[pyo3(signature = (channel=0))]
+    fn view_log(&self, channel: i32) -> PyResult<Vec<String>> {
+        if !(-1..=2).contains(&channel) {
+            return Err(PyValueError::new_err(format!("channel {channel} out of range (-1, 0, 1, 2)")));
+        }
+        Ok(kanto_core::proto::extract_channel(self.game.pb.log(), channel))
+    }
+
     /// The battle's initial seed as a Showdown seed string.
     #[getter]
     fn seed(&self) -> String {

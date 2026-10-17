@@ -129,3 +129,23 @@ def test_input_log_replays_identically_in_showdown(fmt):
     for r in results:
         assert "error" not in r, r.get("error")
         assert _norm(r["log"]) == _norm(battles[r["id"]].log), f"battle {r['id']} differs"
+
+
+def test_view_log_and_replay_html():
+    pb = kanto.ProtocolTeams(kanto.TEAMS_EVAL).battle(seed=4, names=("Alice", "Bob"))
+    rng = random.Random(2)
+    per_step = {c: [] for c in ("spectator", "p1", "p2")}
+    out = pb.start()
+    while True:
+        for c in per_step:
+            per_step[c] += out[c]
+        if pb.ended:
+            break
+        out = pb.step(*[rng.choice(pb.legal_choices(p)) for p in range(2)])
+    assert pb.view_log(0) == per_step["spectator"]
+    assert pb.view_log(1) == per_step["p1"] and pb.view_log(2) == per_step["p2"]
+    assert not any(l.startswith("|split|") for l in pb.view_log(0))
+    page = kanto.replay_html(pb)
+    assert "Alice vs. Bob" in page and "|win|" in page and 'class="battle-log-data"' in page
+    with pytest.raises(ValueError):
+        pb.view_log(3)

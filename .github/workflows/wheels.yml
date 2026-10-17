@@ -1,0 +1,62 @@
+name: wheels
+
+# Builds abi3 wheels (CPython >= 3.10) for Linux (manylinux2014 x86_64/aarch64), macOS
+# (x86_64/arm64) and Windows (x64), and smoke-tests each one outside the checkout (the gen1ou
+# team pool is embedded in the extension). Runs on tags and on demand; publishing to PyPI is a
+# separate, manual step (PyPI trusted publishing, `uv publish`, ...).
+#
+# Status: written during the 2026-10 audit and checked locally only for Linux aarch64
+# (`maturin build --release` + the smoke test below); the other targets have not been run.
+# No sdist: `maturin sdist` currently produces an archive that does not build (workspace members
+# and the embedded team data are missing; docs/AUDIT_2026-10.md).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  wheels:
+    name: ${{ matrix.os }} ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64, manylinux: "2014" }
+          - { os: ubuntu-24.04-arm, target: aarch64, manylinux: "2014" }
+          - { os: macos-13, target: x86_64 }
+          - { os: macos-14, target: aarch64 }
+          - { os: windows-latest, target: x64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+          args: --release --out dist
+      - name: smoke test (outside the checkout)
+        shell: bash
+        run: |
+          python -m pip install numpy
+          python -m pip install --no-index --find-links dist kanto
+          cd "$RUNNER_TEMP"
+          python - <<'EOF'
+          import numpy as np, kanto
+          env = kanto.VecEnv(num_envs=16, seed=0, teams=kanto.TEAMS_EVAL, threads=2, opponent="random")
+          obs, mask = env.reset()
+          for _ in range(20):
+              a = np.array([[np.flatnonzero(m[0])[0], 0] for m in mask], dtype=np.int16)
+              obs, mask, *_ = env.step(a)
+          pb = kanto.ProtocolTeams(kanto.TEAMS_TRAIN).battle(seed=1)
+          pb.start()
+          print("ok", obs.shape, kanto.convert_team(pb.packed_team(0)).splitlines()[0])
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.os }}-${{ matrix.target }}
+          path: dist/*.whl
+
