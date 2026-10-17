@@ -22,7 +22,7 @@ fn rules_of(format: &str) -> PyResult<Rules> {
     }
 }
 
-fn parse_team(text: &str, validate: bool) -> PyResult<Team> {
+pub(crate) fn parse_team(text: &str, validate: bool) -> PyResult<Team> {
     let specs = parse_teams(text).map_err(PyValueError::new_err)?;
     let spec = specs.first().ok_or_else(|| PyValueError::new_err("no team in JSON"))?;
     Team::from_spec_opts(spec, validate).map_err(PyValueError::new_err)

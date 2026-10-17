@@ -6,6 +6,7 @@ use kanto_env::obs::OBS_DIM;
 use numpy::PyArray1;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyBytes;
 
 /// One player's view of a Showdown battle, as env observations.
 ///
@@ -59,6 +60,33 @@ impl ClientBattle {
     #[getter]
     fn ended(&self) -> bool {
         self.inner.ended()
+    }
+
+    /// A full simulator state consistent with this player's observations, as a ``VecEnv``
+    /// state blob (``VecEnv.restore_state``; backend ``"native"``). ``own_team``: this player's
+    /// team JSON (its exact sets, original order); ``opp_team``: a guess of the opponent's (the
+    /// Pokémon seen so far first, in order of appearance, with every revealed move). Hidden parts
+    /// are sampled from ``seed``. Raises ``ValueError`` for unsupported states (Transform, Bide,
+    /// Mimic, active partial trapping) and when there is no decision to make.
+    fn determinize<'py>(&self, py: Python<'py>, own_team: &str, opp_team: &str, seed: u64) -> PyResult<Bound<'py, PyBytes>> {
+        let own = crate::proto::parse_team(own_team, false)?;
+        let opp = crate::proto::parse_team(opp_team, false)?;
+        let env = kanto_backend::determinize(&self.inner.snapshot(), &own, &opp, seed).map_err(PyValueError::new_err)?;
+        Ok(PyBytes::new(py, &env.to_bytes()))
+    }
+
+    /// Opponent Pokémon seen so far, in order of appearance: ``[(species, level, [moves])]``
+    /// (species and move names; revealed moves only).
+    fn opponent_seen(&self) -> Vec<(String, u8, Vec<String>)> {
+        let s = self.inner.snapshot();
+        let foe = 1 - s.me;
+        (0..s.opp_seen as usize)
+            .map(|j| {
+                let m = &s.view.sides[foe].mons[j];
+                let moves = s.mem[s.me].moves[j].iter().filter(|&&x| x != 0).map(|&x| kanto_env::data::MOVE_NAMES[x as usize].to_string()).collect();
+                (kanto_env::data::SPECIES_NAMES[m.species as usize].to_string(), m.level, moves)
+            })
+            .collect()
     }
 
     /// A request is waiting for its update.
