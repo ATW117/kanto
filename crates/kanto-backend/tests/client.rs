@@ -102,6 +102,14 @@ fn client_matches_env() {
                         *by_field.entry(field(k)).or_default() += 1;
                     }
                 }
+                // The opponent's memory of this player's team (reveals are indexed by this
+                // player's original party order in both).
+                let (om, gm) = (cl[p].opponent_memory(), &g.mem[1 - p]);
+                let reveal = |m: &kanto_env::memory::Memory| (m.n_revealed, m.reveal_order, m.slot_of, m.moves, m.move_uses, m.opp_transformed);
+                if only.is_none() && (reveal(om) != reveal(gm) || om.sleep_obs[p] != gm.sleep_obs[p] || om.last != gm.last) {
+                    diffs.push(format!("opponent memory: want {:?} got {:?}", gm, om));
+                    *by_field.entry("opp_memory".into()).or_default() += 1;
+                }
                 if mask != g.mask[p] {
                     diffs.push(format!("mask want {:?} got {:?}", g.mask[p], mask));
                     *by_field.entry("mask".into()).or_default() += 1;

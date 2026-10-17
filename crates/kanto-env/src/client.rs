@@ -97,6 +97,9 @@ pub struct ClientBattle {
     name: String,
     view: View,
     mem: Memory,
+    /// The opponent's memory: what it has learned about the observer's team (public, so exact);
+    /// its public trackers equal `mem`'s.
+    opp_mem: Memory,
     extra: [[MonExtra; 6]; 2],
     own: OwnActive,
     /// Opponent boosts in the simulator's order (accuracy/evasion included).
@@ -117,6 +120,8 @@ pub struct ClientBattle {
     /// The move being resolved: (user, move id, whether its stat change already re-applied the
     /// foe's paralysis/burn drop).
     last_move: Option<(usize, u8, bool)>,
+    /// The observer transformed: its next full request shows the target's moves.
+    transform_reveal: bool,
     /// Hits of the current partial-trapping sequence per side (0 = not binding).
     bind_hits: [u8; 2],
     /// The observer's move that called its charging two-turn move (Metronome), 0 if none.
@@ -188,6 +193,7 @@ impl ClientBattle {
             name: name.to_string(),
             view,
             mem: Memory::default(),
+            opp_mem: Memory::default(),
             extra: [[MonExtra::default(); 6]; 2],
             own: OwnActive::default(),
             opp_boosts: [0; 7],
@@ -201,6 +207,7 @@ impl ClientBattle {
             ended: false,
             last_move: None,
             bind_hits: [0; 2],
+            transform_reveal: false,
             charge_src: 0,
         }
     }
@@ -236,6 +243,10 @@ impl ClientBattle {
             if self.started {
                 self.update_trackers(self.turn > turn_before && turn_before > 0);
             }
+            // Public trackers are the same in both players' memories.
+            self.opp_mem.track = self.mem.track;
+            self.opp_mem.sleep_obs = self.mem.sleep_obs;
+            self.opp_mem.last = self.mem.last;
         } else {
             self.header(&log);
         }
@@ -365,6 +376,15 @@ impl ClientBattle {
                         a.pp[k] = m["pp"].as_u64().unwrap_or(0) as u8;
                     }
                     self.sync_base_pp();
+                    if self.transform_reveal {
+                        self.transform_reveal = false;
+                        let fi = self.view.sides[1 - me].active.party_idx;
+                        if fi != UNREVEALED {
+                            for mv in self.view.sides[me].active.moves {
+                                self.mem.see_move(fi, mv, false);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -460,6 +480,17 @@ impl ClientBattle {
     /// The memory (reveals and public trackers) of the observing player.
     pub fn memory(&self) -> &Memory {
         &self.mem
+    }
+
+    /// The opponent's memory of the observer's team (indexed by the observer's original party
+    /// order), as the env keeps it for the other seat.
+    pub fn opponent_memory(&self) -> &Memory {
+        &self.opp_mem
+    }
+
+    /// The observer's base move ids of party member `i`.
+    fn own_stored(&self, i: usize) -> [u8; 4] {
+        self.view.sides[self.me()].mons[i.min(5)].moves
     }
 
     /// The reconstructed view the observation is encoded from (opponent Pokémon in order of
@@ -558,6 +589,9 @@ impl ClientBattle {
                     if p != me {
                         self.mem.reveal(i as u8);
                         self.mem.opp_transformed = false;
+                    } else {
+                        self.opp_mem.reveal(i as u8);
+                        self.opp_mem.opp_transformed = false;
                     }
                     self.mem.track[p] = Default::default();
                     last[p].switched = true;
@@ -580,6 +614,10 @@ impl ClientBattle {
                     };
                     self.last_move = Some((p, mv, false));
                     let still = parts.contains(&"[still]");
+                    // A selection (no `[from]`, a charge turn included) reveals the observer's move.
+                    if p == me && !from && !self.opp_mem.opp_transformed && self.own_stored(i).contains(&mv) {
+                        self.opp_mem.see_move(i as u8, mv, true);
+                    }
                     if p != me {
                         // Moves the user does not own (Struggle, a Mimic copy) are not reveals. A
                         // Mimic copy of a move the user also knows is indistinguishable: count it
@@ -639,6 +677,9 @@ impl ClientBattle {
                     }
                     if reason == cant::DISABLE && p != me && self.mem.track[p].mimic_move != mv {
                         self.mem.see_move(i as u8, mv, false);
+                    }
+                    if reason == cant::DISABLE && p == me && self.own_stored(i).contains(&mv) {
+                        self.opp_mem.see_move(i as u8, mv, false);
                     }
                     if reason == cant::RECHARGE {
                         self.view.sides[p].active.volatiles &= !vol::RECHARGING;
@@ -744,6 +785,8 @@ impl ClientBattle {
                 "-start" if parts.len() >= 4 => {
                     let Some((p, name)) = parse_ident(parts[2]) else { continue };
                     let Some(i) = self.slot(p, name, None) else { continue };
+                    let own_idx = self.view.sides[me].active.party_idx;
+                    let own_stored = if own_idx != UNREVEALED { self.own_stored(own_idx as usize) } else { [0; 4] };
                     let a = &mut self.view.sides[p].active;
                     match parts[3] {
                         "confusion" => {
@@ -770,6 +813,9 @@ impl ClientBattle {
                             if p != me && self.mem.track[p].mimic_move != mv {
                                 self.mem.see_move(i as u8, mv, false);
                             }
+                            if p == me && own_stored.contains(&mv) {
+                                self.opp_mem.see_move(i as u8, mv, false);
+                            }
                         }
                         "Mimic" => {
                             let mv = parts.get(4).and_then(|m| data::move_id(m)).unwrap_or(0);
@@ -780,6 +826,9 @@ impl ClientBattle {
                                 if fi != UNREVEALED && !self.mem.opp_transformed {
                                     self.mem.see_move(fi, mv, false);
                                 }
+                            } else if own_idx != UNREVEALED && own_stored.contains(&mv) {
+                                // The foe's Mimic copied one of the observer's moves.
+                                self.opp_mem.see_move(own_idx, mv, false);
                             }
                         }
                         "typechange" => {
@@ -844,6 +893,7 @@ impl ClientBattle {
             }
         }
         self.mem.last = last;
+        self.opp_mem.last = last;
     }
 
     fn update_trackers(&mut self, turn_advanced: bool) {
@@ -1102,9 +1152,19 @@ impl ClientBattle {
             self.own.stored = [s[1], s[2], s[4], s[4], s[3]];
             self.own.modified = self.own.stored;
             self.own.boosts = if q == me { self.own.boosts } else { self.opp_boosts };
+            self.opp_mem.opp_transformed = true;
+            // The observer sees the target's moveset in its next request.
+            self.transform_reveal = true;
         } else {
             self.mem.opp_transformed = true;
             self.opp_boosts = self.own.boosts;
+            // The transformer's owner sees the observer's moveset.
+            let i = self.view.sides[me].active.party_idx;
+            if i != UNREVEALED {
+                for mv in self.own_stored(i as usize) {
+                    self.opp_mem.see_move(i, mv, false);
+                }
+            }
         }
     }
 }
