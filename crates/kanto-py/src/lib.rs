@@ -357,5 +357,7 @@ fn _kanto(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(species_names, m)?)?;
     m.add_function(wrap_pyfunction!(move_names, m)?)?;
     m.add_function(wrap_pyfunction!(bench_engine, m)?)?;
+    m.add_function(wrap_pyfunction!(proto::convert_team, m)?)?;
+    m.add_function(wrap_pyfunction!(proto::validate_team, m)?)?;
     Ok(())
 }

@@ -33,10 +33,12 @@ from ._kanto import (
     OUTCOME_ERROR,
     SPECIES_UNKNOWN,
     ProtocolBattle,
+    convert_team,
     id_offsets,
     move_names,
     obs_layout,
     species_names,
+    validate_team,
 )
 
 __all__ = [
@@ -58,6 +60,8 @@ __all__ = [
     "TEAMS_TRAIN",
     "TEAMS_EVAL",
     "obs_layout",
+    "convert_team",
+    "validate_team",
     "id_offsets",
     "species_names",
     "move_names",
@@ -88,7 +92,12 @@ def _resolve_teams(teams: str | os.PathLike[str]) -> str:
     if os.path.exists(s):
         return s
     alt = _REPO_ROOT / s
-    return str(alt) if alt.exists() else s
+    if alt.exists():
+        return str(alt)
+    # Installed from a wheel (no checkout): the gen1ou pool is embedded in the extension.
+    if s.rstrip("/") == "data/teams/gen1ou":
+        return "gen1ou"
+    return s
 
 
 class VecEnv:
