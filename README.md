@@ -7,9 +7,9 @@ Given the same teams, seed and choices, kanto makes the same PRNG calls, reaches
 offers the same legal choices as [Pokémon Showdown](https://github.com/smogon/pokemon-showdown)
 0.11.11 `[Gen 1] OU`, at every decision. It can also write Showdown's text protocol (battle log,
 per-player views, `|request|` JSON) line for line, so Showdown bots can play it offline, and it
-can serve unmodified poke-env clients through a local Showdown-protocol server. Its engine runs
-about 5 M turns/s on one core (random self-play, no protocol text); Showdown, which always builds
-its text log, runs about 5 k.
+can serve unmodified poke-env clients through a local Showdown-protocol server. On identical
+battles on one core, kanto writing Showdown's full battle log is 24-25x faster than Showdown, and
+its engine without text, which RL environments use, is about 900x faster ([Speed](#speed)).
 
 ```python
 import numpy as np, kanto

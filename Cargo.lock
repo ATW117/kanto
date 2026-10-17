@@ -59,6 +59,7 @@ dependencies = [
  "kanto-data",
  "kanto-env",
  "kanto-gen1",
+ "serde_json",
 ]
 
 [[package]]
