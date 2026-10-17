@@ -263,12 +263,14 @@ impl<B: Backend> VecEnv<B> {
 /// mask rows are all zeros/false (the Rust opponent picks its own actions from the env's
 /// internal mask), so nothing about its options leaks to the caller.
 fn write_obs<B: Backend>(env: &Env<B>, cfg: &EnvConfig, obs: &mut [f32], mask: &mut [bool]) {
-    env.observe(0, cfg, &mut obs[..OBS_DIM]);
     mask[..NUM_ACTIONS].copy_from_slice(&env.mask[0]);
     if cfg.opponent.is_none() {
-        env.observe(1, cfg, &mut obs[OBS_DIM..]);
+        // One view decode for both players (it is player-independent).
+        let (o0, o1) = obs.split_at_mut(OBS_DIM);
+        B::observe_both(&env.battle, &env.mem, cfg.reveal_hidden, o0, &mut o1[..OBS_DIM]);
         mask[NUM_ACTIONS..].copy_from_slice(&env.mask[1]);
     } else {
+        env.observe(0, cfg, &mut obs[..OBS_DIM]);
         obs[OBS_DIM..].fill(0.0);
         mask[NUM_ACTIONS..].fill(false);
     }

@@ -97,4 +97,12 @@ pub trait Backend: Send + Sync + 'static {
     fn observe(b: &Self::Battle, player: usize, mem: &Memory, privileged: bool, out: &mut [f32]) {
         crate::obs::encode(&Self::view(b), player, mem, privileged, out);
     }
+
+    /// Both players' observations (`out0`, `out1`, each `obs::OBS_DIM` long), equal to two
+    /// [`Backend::observe`] calls. The default decodes the view once for both.
+    fn observe_both(b: &Self::Battle, mem: &[Memory; 2], privileged: bool, out0: &mut [f32], out1: &mut [f32]) {
+        let v = Self::view(b);
+        crate::obs::encode(&v, 0, &mem[0], privileged, out0);
+        crate::obs::encode(&v, 1, &mem[1], privileged, out1);
+    }
 }
