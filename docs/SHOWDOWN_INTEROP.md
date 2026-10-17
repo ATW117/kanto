@@ -113,10 +113,17 @@ Players that send a team (`team=` in poke-env, i.e. `/utm`) play it, after `vali
 (`--no-validate` to skip); players that do not get teams from `--teams`. Choices may name moves
 and Pokémon as poke-env sends them (`move thunderbolt`, `switch chansey`), and `default`.
 
-Measured with poke-env 0.16.1 (one Python process for both clients; Random vs Random, 10
-concurrent battles): about 120 battles/s against kanto.server vs 56 battles/s against
-`pokemon-showdown start --no-security` on the same machine; one battle at a time, 71 vs 7.6
-battles/s. At these rates poke-env's own message handling is the bottleneck.
+Measured with poke-env 0.16.1 (one Python process for both clients, `/utm` with one 6-Pokémon
+pool team; DGX Spark, 2026-10-16):
+
+| Random vs Random | kanto.server | `pokemon-showdown start --no-security` (0.11.11) |
+| --- | ---: | ---: |
+| 10 concurrent battles | 115-121 battles/s | 56 battles/s |
+| one battle at a time | 52-71 battles/s | 7.6 battles/s |
+
+Random vs MaxBasePower, 10 concurrent: 226 vs 118 battles/s. At these rates poke-env's own message
+handling, not the simulator, is the bottleneck (kanto.server uses about 12 ms of CPU per battle);
+the speedup comes mostly from Showdown's per-turn latency.
 `tests/python/test_server.py` plays challenge, `/utm` and ladder battles when poke-env is
 installed.
 
