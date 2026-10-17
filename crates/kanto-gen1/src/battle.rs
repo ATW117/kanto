@@ -1045,6 +1045,14 @@ impl Battle {
 
     /// The side effects of `Pokemon#getMoveRequestData` for the active Pokémon (trapped,
     /// maybeLocked); [`Battle::request_moves`] gives the request itself.
+    /// Set `p`'s request to a move request, with `makeRequest`'s side effects (for states built
+    /// outside the turn loop, e.g. reconstructed from a player's observations).
+    pub fn set_move_request(&mut self, p: Player) {
+        check_player(p);
+        self.sides[p].request = Request::Move;
+        self.request_side_effects(p);
+    }
+
     pub(crate) fn request_side_effects(&mut self, p: Player) {
         // Idempotent: a hard lock traps; otherwise maybeDisabled feeds maybeLocked (Gen 1 never
         // sets maybeDisabled, so the request is unaffected by order).

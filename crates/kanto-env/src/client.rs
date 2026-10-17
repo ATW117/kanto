@@ -71,6 +71,51 @@ fn set_bit(v: &mut u32, bit: u32, on: bool) {
     }
 }
 
+/// What the observer has to decide now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RequestKind {
+    /// No request yet, or the battle is over.
+    None,
+    /// A move request (moves and/or switches).
+    Move,
+    /// A forced switch.
+    Switch,
+    /// Waiting for the opponent.
+    Wait,
+}
+
+/// Everything public a [`ClientBattle`] knows, in absolute player order (index = player). The
+/// input of state reconstruction (`kanto_backend::determinize`).
+#[derive(Clone, Copy, Debug)]
+pub struct Snapshot {
+    pub me: usize,
+    pub turn: u16,
+    /// The view the observation is encoded from (opponent Pokémon in order of appearance,
+    /// opponent HP as percentages of 100, the observer's modified stats and both sides' boosts in
+    /// the active blocks).
+    pub view: View,
+    /// Both players' memories (`mem[me]` the observer's, `mem[1 - me]` the opponent's).
+    pub mem: [Memory; 2],
+    /// Raw status per (player, party index): Toxic stays Toxic until a switch-in.
+    pub raw_status: [[u8; 6]; 2],
+    /// The paralysis/burn drops each Pokémon keeps on the bench.
+    pub bench_par: [[bool; 6]; 2],
+    pub bench_brn: [[bool; 6]; 2],
+    /// Both actives' boosts in the simulator's order `[atk, def, spa, spd, spe, accuracy, evasion]`.
+    pub boosts: [[i8; 7]; 2],
+    /// The observer's active: stored and modified stats `[atk, def, spa, spd, spe]`.
+    pub own_stored: [u16; 5],
+    pub own_modified: [u16; 5],
+    /// The observer's request order: position -> original party index.
+    pub order: [u8; 6],
+    pub n_order: u8,
+    pub request: RequestKind,
+    /// Hits of the current partial-trapping sequence per player.
+    pub bind_hits: [u8; 2],
+    /// Number of opponent Pokémon seen (they occupy appearance indices 0..n).
+    pub opp_seen: u8,
+}
+
 /// Per-Pokémon state the client tracks beyond the [`View`].
 #[derive(Clone, Copy, Debug, Default)]
 struct MonExtra {
@@ -480,6 +525,47 @@ impl ClientBattle {
     /// The memory (reveals and public trackers) of the observing player.
     pub fn memory(&self) -> &Memory {
         &self.mem
+    }
+
+    /// The public state, for state reconstruction.
+    pub fn snapshot(&self) -> Snapshot {
+        let me = self.me();
+        let mut mem = [Memory::default(); 2];
+        mem[me] = self.mem;
+        mem[1 - me] = self.opp_mem;
+        let mut order = [0u8; 6];
+        for (k, &o) in self.order.iter().take(6).enumerate() {
+            order[k] = o;
+        }
+        let request = match &self.request {
+            None => RequestKind::None,
+            Some(_) if self.ended => RequestKind::None,
+            Some(r) if r["wait"].as_bool() == Some(true) => RequestKind::Wait,
+            Some(r) if r["forceSwitch"].as_array().and_then(|a| a.first()).and_then(|v| v.as_bool()) == Some(true) => {
+                RequestKind::Switch
+            }
+            Some(_) => RequestKind::Move,
+        };
+        let mut boosts = [[0i8; 7]; 2];
+        boosts[me] = self.own.boosts;
+        boosts[1 - me] = self.opp_boosts;
+        Snapshot {
+            me,
+            turn: self.turn,
+            view: self.view(),
+            mem,
+            raw_status: std::array::from_fn(|p| std::array::from_fn(|i| self.extra[p][i].raw_status)),
+            bench_par: std::array::from_fn(|p| std::array::from_fn(|i| self.extra[p][i].bench_par)),
+            bench_brn: std::array::from_fn(|p| std::array::from_fn(|i| self.extra[p][i].bench_brn)),
+            boosts,
+            own_stored: self.own.stored,
+            own_modified: self.own.modified,
+            order,
+            n_order: self.order.len().min(6) as u8,
+            request,
+            bind_hits: self.bind_hits,
+            opp_seen: self.opp_names.len() as u8,
+        }
     }
 
     /// The opponent's memory of the observer's team (indexed by the observer's original party

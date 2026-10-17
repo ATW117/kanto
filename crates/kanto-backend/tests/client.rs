@@ -227,3 +227,84 @@ fn client_ignores_room_messages() {
         }
     }
 }
+
+/// `determinize` rebuilds a full state from a player's snapshot (with the true opponent team as
+/// the guess): the env's observation and mask for that player equal the client's.
+#[test]
+fn determinize_matches_observation() {
+    use kanto_env::team::Team;
+    let games: u64 = std::env::var("CLIENT_GAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(300);
+    let source = pool();
+    let (mut tried, mut ok) = (0u64, 0u64);
+    let mut reasons: std::collections::BTreeMap<String, u64> = Default::default();
+    for seed in 0..games {
+        let mut rng = Rng::new(seed);
+        let teams = [source.sample(&mut rng), source.sample(&mut rng)];
+        let b = kanto_backend::new_battle(&teams[0], &teams[1], rng.next_u64(), kanto_gen1::Rules::OU);
+        let mut g = kanto_backend::ProtoGame::new(b, ["p1", "p2"]);
+        let mut cl = [ClientBattle::new("p1"), ClientBattle::new("p2")];
+        let mut out = g.start();
+        let mut arng = Rng::new(seed ^ 0x5eed);
+        for _ in 0..1000 {
+            for p in 0..2 {
+                if let Some(r) = &out.requests[p] {
+                    cl[p].feed(&format!("|request|{r}")).unwrap();
+                }
+                cl[p].feed(&out.view(p as i32 + 1).join("\n")).unwrap();
+                cl[p].flush();
+            }
+            if g.battle().ended {
+                break;
+            }
+            for p in 0..2 {
+                let snap = cl[p].snapshot();
+                if !matches!(snap.request, kanto_env::client::RequestKind::Move | kanto_env::client::RequestKind::Switch) {
+                    continue;
+                }
+                tried += 1;
+                // The true opponent team in order of appearance, unseen members after.
+                let foe = &teams[1 - p];
+                let order = g.mem[p].reveal_order;
+                let n = g.mem[p].n_revealed as usize;
+                let mut mons: Vec<_> = order[..n].iter().map(|&i| foe.mons()[i as usize]).collect();
+                for (i, m) in foe.mons().iter().enumerate() {
+                    if !order[..n].contains(&(i as u8)) {
+                        mons.push(*m);
+                    }
+                }
+                let guess = Team::new(&mons);
+                match kanto_backend::determinize(&snap, &teams[p], &guess, seed * 1000 + tried) {
+                    Ok(env) => {
+                        ok += 1;
+                        let (mut want, mut got) = (vec![0f32; OBS_DIM], vec![0f32; OBS_DIM]);
+                        cl[p].observe(&mut want);
+                        env.observe(p, &Default::default(), &mut got);
+                        for k in 0..OBS_DIM {
+                            if want[k] != got[k] && !HIDDEN.contains(&field(k).as_str()) {
+                                panic!("seed {seed} turn {} player {}: {} client {} rebuilt {}", g.battle().turn, p + 1, field(k), want[k], got[k]);
+                            }
+                        }
+                        assert_eq!(env.mask[p], cl[p].mask(), "seed {seed} turn {}: masks differ", g.battle().turn);
+                        // The rebuilt state plays on.
+                        let mut e = env.clone();
+                        let cfg = Default::default();
+                        let mut r2 = Rng::new(tried);
+                        for _ in 0..30 {
+                            let a1 = kanto_env::opponent::random_legal(&e.mask[0], &mut r2);
+                            let a2 = kanto_env::opponent::random_legal(&e.mask[1], &mut r2);
+                            if e.step(a1, a2, &cfg, &source).done {
+                                break;
+                            }
+                        }
+                    }
+                    Err(e) => *reasons.entry(e).or_default() += 1,
+                }
+            }
+            let a1 = pick(&g.mask[0], &mut arng);
+            let a2 = pick(&g.mask[1], &mut arng);
+            out = g.step_actions(a1, a2).unwrap();
+        }
+    }
+    eprintln!("determinize: {ok}/{tried} decisions rebuilt; unsupported: {reasons:?}");
+    assert!(ok * 10 >= tried * 9, "too many unsupported states");
+}

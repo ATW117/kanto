@@ -20,7 +20,9 @@ use kanto_data::gen1::SPECIES;
 use kanto_gen1::state::{st, v, Battle};
 use kanto_gen1::{MonSpec, Prng, Rules};
 
+mod determinize;
 mod proto_game;
+pub use determinize::determinize;
 pub use proto_game::ProtoGame;
 
 /// Gen 1 with Sleep Clause Mod and Freeze Clause Mod (`[Gen 1] OU`).
