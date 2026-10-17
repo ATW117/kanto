@@ -10,6 +10,7 @@
 //! parity mutscan  <dump.jsonl>...                   (Node-free replay of `fuzz --dump` traces)
 //! parity shrink   <failures.jsonl>...
 //! parity bench    [--battles N] [--seed S]
+//! parity teams    [--random N] [--seed S] [--level100]  (Showdown team formats + gen1ou validator)
 //! parity diff-pkmn [--battles N] [--teams T] [--compat pkmn|vanilla]
 //! ```
 //! See docs/SIM_DESIGN.md ("Parity harness").
@@ -20,6 +21,7 @@ mod replay;
 mod runner;
 mod snapshot;
 mod spec;
+mod teams;
 
 use kanto_env::rng::Rng;
 use replay::{replay, Divergence, Replay, Trace};
@@ -43,7 +45,7 @@ impl Args {
             if let Some(k) = s.strip_prefix("--") {
                 if let Some((k, v)) = k.split_once('=') {
                     a.kv.insert(k.into(), v.into());
-                } else if i + 1 < raw.len() && !raw[i + 1].starts_with("--") && !matches!(k, "verbose" | "shrink") {
+                } else if i + 1 < raw.len() && !raw[i + 1].starts_with("--") && !matches!(k, "verbose" | "shrink" | "level100") {
                     a.kv.insert(k.into(), raw[i + 1].clone());
                     i += 1;
                 } else {
@@ -116,6 +118,13 @@ fn main() {
         "mutscan" => mutscan(&args),
         "regen" => regen(&args),
         "proto-corpus" => proto_corpus(&args),
+        "teams" => {
+            let ps = args.kv.get("ps").cloned();
+            if let Err(e) = teams::run(&repo_root(), args.num("random", 5000) as usize, args.num("seed", 1), args.flag("level100"), ps.as_deref()) {
+                eprintln!("parity teams: {e}");
+                std::process::exit(1);
+            }
+        }
         "bench" => bench::bench(args.num("battles", 2000) as usize, args.num("seed", 1), &args.get("teams", "randbats")),
         #[cfg(feature = "pkmn")]
         "diff-pkmn" => {
