@@ -66,26 +66,20 @@ fuzzed battle reached could still differ. To check the numbers yourself:
 
 ## Speed
 
-Single-threaded engine throughput: uniform-random self-play, `[Gen 1] OU`, the same games for both
-native engines, on one aarch64 core (NVIDIA DGX Spark, Cortex-X925). No observations are built.
+Like-for-like, on identical battles (the same seeds, teams and choices) on one aarch64 core
+(NVIDIA DGX Spark, Cortex-X925), both engines writing Showdown's full battle log and requests:
 
-| Engine | gen1ou pool shipped here | gen1ou ladder pool (9,232 teams) |
+| Engine | turns/s | vs Showdown |
 | --- | ---: | ---: |
-| Pokémon Showdown 0.11.11 (JavaScript, Node 22) | 4.3 k turns/s | 5.2 k turns/s |
-| **kanto** | **4.98 M turns/s** | **4.59 M turns/s** |
-| [pkmn/engine](https://github.com/pkmn/engine) (Zig, `-Dshowdown`, no log) | 6.69 M turns/s | 6.18 M turns/s |
+| Pokémon Showdown 0.11.11 `BattleStream` (Node 22) | 7.7 k | 1x |
+| **kanto `ProtocolBattle`** (byte-identical log and requests) | **185-189 k** | **24-25x** |
+| **kanto engine** (no text; what `VecEnv` steps) | **6.8-7.0 M** | **~900x** |
 
-Showdown always builds its text log, so its figure includes protocol output; the kanto and pkmn
-figures do not. kanto's protocol mode costs little at the env level: a Python-driven protocol
-battle with random choices runs about 1,250 games/s on one thread. pkmn/engine is faster (its
-battle state is 384 bytes against kanto's 760) but targets a patched Showdown; kanto matches
-vanilla Showdown. The ladder pool is not redistributed (see [Team data](#team-data)). Reproduce:
-
-```bash
-cargo run --release -p kanto-backend --features pkmn --example bench -- 20000 data/teams/gen1ou
-node bench/showdown_bench.js $PS_DIR data/teams/gen1ou/teams.jsonl 2000
-python bench/bench.py --quick             # multi-threaded engine and VecEnv.step throughput
-```
+Method, scripts and per-pool numbers: [bench/protocol/README.md](bench/protocol/README.md). The
+engine row replays fixed choices; random self-play, which also enumerates legal choices, runs
+4.6-5.0 M turns/s, and [pkmn/engine](https://github.com/pkmn/engine) (Zig, `-Dshowdown`, no log)
+6.2-6.7 M turns/s on the same core (`cargo run --release -p kanto-backend --features pkmn --example
+bench`). pkmn/engine targets a patched Showdown; kanto matches vanilla Showdown.
 
 `VecEnv.step` with N = 4096 envs, including observation encoding and masks for both players,
 runs about 1.0 M env-steps/s on one thread and 2.8-3.1 M on 8 (`python bench/bench.py --env-only
