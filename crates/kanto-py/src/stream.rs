@@ -39,7 +39,7 @@ impl PyBattleStream {
             let r = self.inner.write_messages(text).map_err(PyRuntimeError::new_err)?;
             return Ok(r.into_pyobject(py)?.into_any().unbind());
         }
-        let out = self.inner.write(text).map_err(PyRuntimeError::new_err)?;
+        let out = self.inner.write(text).map_err(|e| PyRuntimeError::new_err(e.message))?;
         Ok(out.into_pyobject(py)?.into_any().unbind())
     }
 
@@ -66,5 +66,5 @@ impl PyBattleStream {
 #[pyfunction]
 pub fn simulate_battle(text: &str) -> PyResult<String> {
     let mut s = sd::BattleTextStream::new();
-    s.write(text).map_err(PyRuntimeError::new_err)
+    s.write(text).map_err(|e| PyRuntimeError::new_err(e.message))
 }

@@ -5,4 +5,4 @@ pub mod json;
 pub mod sets;
 pub mod stream;
 
-pub use stream::{BattleStream, BattleTextStream};
+pub use stream::{BattleStream, BattleTextStream, StreamError};

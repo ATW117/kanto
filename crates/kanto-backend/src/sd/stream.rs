@@ -68,8 +68,8 @@ impl BattleStream {
                 b.send_updates(&mut Out { msgs: &mut self.out, at_eof: &mut self.at_eof, keep_alive: self.keep_alive });
             }
         }
-        let msgs = std::mem::take(&mut self.out);
-        r.map(|_| msgs)
+        // On an error the messages stay queued for [`BattleStream::take_output`].
+        r.map(|_| std::mem::take(&mut self.out))
     }
 
     fn write_lines(&mut self, chunk: &str) -> Result<(), String> {
@@ -223,7 +223,7 @@ impl BattleTextStream {
     }
 
     /// `BattleTextStream#_write`: returns the text output this write produced.
-    pub fn write(&mut self, text: &str) -> Result<String, String> {
+    pub fn write(&mut self, text: &str) -> Result<String, StreamError> {
         self.current.push_str(text);
         let Some(i) = self.current.rfind('\n') else { return Ok(String::new()) };
         let chunk: String = self.current[..i].to_string();
@@ -231,13 +231,13 @@ impl BattleTextStream {
         let r = self.stream.write(&chunk);
         let msgs = match r {
             Ok(m) => m,
-            Err(e) => {
-                // (What was pushed before the throw is still output.)
-                let mut s = String::new();
+            Err(message) => {
+                // What was pushed before the throw is still written out.
+                let mut output = String::new();
                 for m in self.stream.take_output() {
-                    format_message(&mut s, &m);
+                    format_message(&mut output, &m);
                 }
-                return Err(if s.is_empty() { e } else { format!("{e}\n--- output before the error ---\n{s}") });
+                return Err(StreamError { output, message });
             }
         };
         let mut s = String::new();
@@ -247,6 +247,22 @@ impl BattleTextStream {
         Ok(s)
     }
 }
+
+/// What Showdown would throw (`simulate-battle` dies with it), and the text output of the same
+/// write before the throw.
+#[derive(Clone, Debug)]
+pub struct StreamError {
+    pub output: String,
+    pub message: String,
+}
+
+impl std::fmt::Display for StreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for StreamError {}
 
 impl BattleTextStream {
     /// Like [`BattleTextStream::write`] but returns the messages unformatted (object mode).
@@ -1228,6 +1244,23 @@ impl SdBattle {
             let c = self.get_choice(p);
             if !c.is_empty() {
                 self.input_log.push(format!(">p{} {c}", p + 1));
+            }
+        }
+        // Side#commitChoices (Gen 1) throws when `lastSelectedMoveSlot` points past the active's
+        // move slots for a 'fight' (asleep/frozen) or locked move: Showdown 0.11.11 crashes there
+        // (docs/SIM_STATUS.md, "Showdown crashes"), and so does the stream, for the same input.
+        {
+            let b = self.b.as_ref().unwrap();
+            for p in 0..2 {
+                if let Some(Act::Move { moveid, native }) = self.choice[p].actions.first() {
+                    let sd = &b.sides[p];
+                    let normal = matches!(native, Choice::Move(_)) && moveid != "fight" && moveid != "struggle" && b.locked_move(p).or_else(|| b.semi_locked_move(p, false)).is_none();
+                    let fight_asleep = moveid == "fight" && matches!(sd.mon().status, st::FRZ | st::SLP);
+                    let locked = moveid != "fight" && moveid != "struggle" && !normal;
+                    if (fight_asleep || locked) && sd.last_selected_move_slot as usize >= sd.active.n_slots as usize {
+                        return Err("Error: moveSlot is null which shouldn't happen".into());
+                    }
+                }
             }
         }
         let native = |c: &SideChoice| match c.actions.first() {

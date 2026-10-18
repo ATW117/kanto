@@ -216,8 +216,8 @@ pub fn gen_input(seed: u64) -> String {
     }
     if !inline {
         for (p, o) in &players {
-            if chance(&mut rng, 0.05) {
-                // A choice before the battle starts.
+            if chance(&mut rng, 0.01) {
+                // A choice before the battle starts (Showdown throws).
                 push(&mut s, &mut reqs, &mut lines, format!(">{p} move 1"));
             }
             if !push(&mut s, &mut reqs, &mut lines, format!(">player {p} {}", Value::Obj(o.clone()).stringify())) {
@@ -351,7 +351,10 @@ fn ours(input: &str, chunks: &[usize]) -> (String, Option<String>) {
         i += n;
         match t.write(part) {
             Ok(o) => out.push_str(&o),
-            Err(e) => return (out, Some(e)),
+            Err(e) => {
+                out.push_str(&e.output);
+                return (out, Some(e.message));
+            }
         }
     }
     (out, None)

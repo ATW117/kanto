@@ -46,8 +46,9 @@ fn main() {
                 }
             }
             Err(e) => {
+                let _ = stdout.write_all(e.output.as_bytes());
                 let _ = stdout.flush();
-                eprintln!("{e}");
+                eprintln!("{}", e.message);
                 std::process::exit(1);
             }
         }
