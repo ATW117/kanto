@@ -357,6 +357,7 @@ impl Battle {
     }
 
     /// `chooseMove`/`chooseSwitch` during a move request.
+    #[inline]
     fn choose_move_request(&mut self, p: Player, c: Choice) -> Chosen {
         match c {
             Choice::Switch(k) => Chosen::Switch(self.sides[p].order[k as usize - 1]),
@@ -409,6 +410,7 @@ impl Battle {
     /// a foe with fewer moves, then falls asleep or freezes and must "Fight"). There is no ground
     /// truth for that state, so we do what pkmn/engine does and read slot 0 instead of panicking
     /// (docs/SIM_STATUS.md, "Showdown crashes").
+    #[inline]
     fn commit_move_choice(&mut self, p: Player, c: Chosen) -> u8 {
         let side = &mut self.sides[p];
         let selected_slot = |side: &Side| {
@@ -485,6 +487,7 @@ impl Battle {
 
     /// `BattleQueue#insertChoice` for an already-resolved action. `pokemon` (side) gets its
     /// `speed` updated first, as Showdown calls `updateSpeed` on `choice.pokemon`.
+    #[inline]
     pub(crate) fn insert_action(&mut self, a: Action, pokemon: Option<Player>) {
         if let Some(p) = pokemon {
             self.update_speed_one(p);
@@ -657,6 +660,7 @@ impl Battle {
     // ---- Switching -------------------------------------------------------------------------
 
     /// `BattleActions#switchIn(pokemon, 0)`.
+    #[inline]
     pub(crate) fn switch_in<S: Sink>(&mut self, p: Player, incoming: u8, voluntary: bool, s: &mut S) {
         let q = 1 - p;
         let side_started = self.started_side(p);
@@ -706,6 +710,7 @@ impl Battle {
 
     /// Initialise [`Active`] from the team member now in front (`switchIn` keeps whatever the
     /// Pokémon's last `clearVolatile` left: base species/types/moves, unboosted modified stats).
+    #[inline]
     fn init_active(&mut self, p: Player) {
         let sd = &mut self.sides[p];
         let m = &sd.mons[sd.order[0] as usize];
