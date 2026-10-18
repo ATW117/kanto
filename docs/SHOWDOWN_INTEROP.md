@@ -116,6 +116,7 @@ out = s.write('>start {"formatid":"gen1ou","seed":"1,2,3,4"}\n'
 out = s.write(">p1 move Body Slam\n>p2 move 9\n")   # p2 gets "|error|[Invalid choice] Can't move: Your Snorlax doesn't have a move 9"
 msgs = s.write(">p2 default\n", messages=True)       # ["update\n|\n|t:|...", "sideupdate\np1\n|request|{...}", ...]
 kanto.simulate_battle(text)                           # a whole input at once
+kanto.extract_channel(update, 1)                      # p1's view of an update (getPlayerStreams / extractChannelMessages)
 ```
 
 What is ported (from pokemon-showdown 0.11.11, `sim/battle-stream.ts`, `sim/side.ts`,

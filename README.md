@@ -198,6 +198,7 @@ cargo run --release -p kanto-parity --bin parity -- fuzz --proto --battles 2000 
 cargo run --release -p kanto-parity --bin parity -- fixtures        # Node-free regression corpus
 python3 parity/mutate.py --jobs 5                                     # mutation testing (~15 min)
 cargo run --release -p kanto-parity --features pkmn --bin parity -- diff-pkmn --battles 5000
+cargo run --release -p kanto-parity --bin parity -- stream-fuzz --battles 1000   # BattleStream text protocol vs Showdown
 ```
 
 A divergence is reported with its category (for example `rng: showdown[getDamage<moveHit]
@@ -211,7 +212,8 @@ crates/kanto-core/      Showdown's PRNG, speedSort, choices, events, protocol lo
 crates/kanto-data/      Gen 1 tables generated from Showdown's dex (tools/gen_sim_data.js)
 crates/kanto-gen1/      the simulator: Copy battle state, mechanics, protocol output
 crates/kanto-env/       Backend trait, VecEnv, observation encoder, reveal memory, opponents, teams
-crates/kanto-backend/   the simulator as a kanto-env backend; ProtoGame; examples/bench.rs
+crates/kanto-backend/   the simulator as a kanto-env backend; ProtoGame; sd/ (Showdown BattleStream,
+                        kanto-simulate CLI); examples/bench.rs
 crates/kanto-parity/    `parity` CLI: Showdown differential fuzzing, shrinking, fixtures
 crates/kanto-py/        PyO3 module kanto._kanto
 crates/pkmn-sys/        optional FFI to pkmn/engine (feature `pkmn`)
