@@ -76,10 +76,13 @@ Like-for-like, on identical battles (the same seeds, teams and choices) on one a
 | **kanto engine** (no text; what `VecEnv` steps) | **6.8-7.0 M** | **~900x** |
 
 Method, scripts and per-pool numbers: [bench/protocol/README.md](bench/protocol/README.md). The
-engine row replays fixed choices; random self-play, which also enumerates legal choices, runs
-4.6-5.0 M turns/s, and [pkmn/engine](https://github.com/pkmn/engine) (Zig, `-Dshowdown`, no log)
-6.2-6.7 M turns/s on the same core (`cargo run --release -p kanto-backend --features pkmn --example
-bench`). pkmn/engine targets a patched Showdown; kanto matches vanilla Showdown.
+engine row replays fixed choices. Against [pkmn/engine](https://github.com/pkmn/engine) (Zig,
+`-Dshowdown`, no log), measured interleaved on the same core with the same harness
+(`cargo run --release -p kanto-backend --features pkmn --example bench -- 10000 randbats 1 h2h`,
+medians of 11 rounds, 2026-10-18): one battle update costs 95 ns (91 ns with
+[PGO](tools/pgo.sh)) vs pkmn's 71 ns, and random self-play, which also enumerates legal choices,
+runs 5.4 M turns/s (5.6 M with PGO) vs 6.4-6.5 M, i.e. 0.84-0.86x pkmn/engine's speed. pkmn/engine
+targets a patched Showdown; kanto matches vanilla Showdown. Details: docs/SIM_STATUS.md, "Speed".
 
 `VecEnv.step` with N = 4096 envs, including observation encoding and masks for both players,
 runs about 1.0 M env-steps/s on one thread and 2.8-3.1 M on 8 (`python bench/bench.py --env-only

@@ -342,7 +342,77 @@ cost but did not change turns/s measurably. Build settings did not help: fat LTO
 noise (±1-2%); `codegen-units = 1` was already set.
 
 `... bench -- N teams seed native` plays only the native games, for
-`valgrind --tool=callgrind` (perf is not available on this machine).
+`valgrind --tool=callgrind` (perf is not available on this machine). `... bench -- N teams seed h2h [rounds]`
+runs the interleaved comparison below.
+
+### Second performance pass (2026-10-18)
+
+Same driver, new `h2h` mode: each engine's choice sequences are recorded once, then 11 rounds
+alternate between replaying all of pkmn/engine's games and all of kanto's (update only), and between
+full self-play runs (update + `choices()` + the uniform policy). Both engines therefore see the same
+machine load in every round. The machine was shared with GPU jobs and ~16 busy Python processes
+(load ~14); runs were pinned with `taskset` to Cortex-X925 cores 7, 15 and 18 and, for reference,
+to an idle Cortex-A725 core (12). `before` = integrate 974b7ce. Medians of 11 rounds, [min-max]:
+
+| X925, 10,000 games | before | after | after + PGO | pkmn/engine |
+| --- | ---: | ---: | ---: | ---: |
+| randbats update (ns) | 107.0-108.0 [106.1-111.3] | 94.6-95.6 [94.2-97.3] | 90.8-91.5 [90.5-92.8] | 70.9-72.6 [70.0-75.7] |
+| randbats kanto/pkmn update time | 1.48-1.51 | 1.33-1.34 | 1.27-1.28 | 1 |
+| randbats self-play (M turns/s) | 4.89-4.93 | 5.35-5.38 | 5.55-5.58 | 6.33-6.52 |
+| randbats kanto/pkmn turns/s | 0.77 | 0.84 | 0.85-0.86 | 1 |
+| gen1ou pool update (ns) | 111.0-112.0 | 100.4-100.7 | 95.4-96.1 | 73.7-75.3 |
+| gen1ou pool kanto/pkmn update time | 1.49-1.51 | 1.34-1.35 | 1.27-1.29 | 1 |
+| gen1ou pool kanto/pkmn turns/s | 0.76 | 0.81-0.82 | 0.84 | 1 |
+
+On the A725 core the ratios are 1.49 -> 1.28 -> 1.23 (randbats update) and 0.79 -> 0.89 -> 0.86
+(turns/s; the PGO profile was trained on X925-like code layout). Within one binary the round-to-round
+spread is about +-1.5% on the X925 cores and +-0.2% on the idle A725 core; between rebuilds of the
+same source, code layout moves the X925 numbers by up to +-2%. `choices()` for both players went
+from 25 to 22 ns per update (pkmn: 17).
+
+kanto is still 1.27-1.33x slower per update than pkmn/engine. What was measured and kept (every
+step checked with `cargo test`, the fixtures and 11,000 recorded Showdown battles replayed
+Node-free; final state: a fresh `parity fuzz` of 10,800 battles / 819,833 steps, protocol runs
+included, 0 divergences):
+
+- Endless Battle Clause check: an active Pokémon that is not fainted or frozen and has a non-Transform
+  move and a move with PP makes the battle not stuck, so the full scan of both teams is skipped
+  (-6% update time).
+- Handler gates (`BeforeMove`, `AfterMove`, `AfterMoveSelf`, `DisableMove`, `Residual`) inlined, bodies
+  outlined; the volatile insertion order uses an insertion sort instead of `sort_by_key` (-4%).
+- `action_tail` (end of `runAction`) has a fast path when nothing fainted and no switch flag is set;
+  BeforeTurn is put in front of the queue without the `insertChoice` scan when the first queued action
+  sorts after it (-2%).
+- Queue actions are packed `u64`s whose high bits are the sort key (-1 to -3%).
+- The sodium (ChaCha20) PRNG step is out of line and cold, so the Gen 5 LCG is all that is inlined
+  into every PRNG call site (-3% on X925; a Gen 5-only PRNG type would gain another ~1%, not worth
+  making `Battle` generic).
+- Fast paths for unlocked actives in `legal_choices` and `chooseMove`; branchless reset of the
+  `disabled` flags at the end of the turn; the outgoing Pokémon's `clearVolatile` on a switch only
+  does its Pokémon-side part (the active state is rebuilt from the incoming Pokémon right after).
+- `modifyStat` and the accuracy stage table use integer arithmetic. Unit tests compare them with
+  Showdown's floating-point expressions for every `u16` stat and every reachable accuracy value.
+  (No measurable speed change: the float code was not hot.)
+- PGO (`tools/pgo.sh`, needs `rustup component add llvm-tools`): -4%. It changes code layout and
+  inlining only; the parity suite runs unchanged on a PGO build. On the code before this pass PGO
+  was within noise.
+
+Measured and dropped: compile-time compat/clause modes (const generics) — hardcoding Vanilla
+everywhere changed nothing measurable (<0.5%: the checks are predictable branches); `-C
+target-cpu=native`, fat LTO, 64-byte function/block alignment — within +-1.5%; caching legal choices
+at request time — `choices()` is 11 ns per player and the cache would grow the `Copy` state that
+search clones; a hot/cold split of the state — the 760-byte `Battle` already fits in L1. The fast
+path for a move-vs-move turn that skips the generic action queue was not built: after the changes
+above the queue operations (sort, insert, shift) are about 7% of update time, and only about half
+of the updates in random play are move-vs-move turns, so it could save at most ~4% while
+re-implementing the speed-tie and `insertChoice` PRNG order.
+
+Profiles (a `SIGPROF` sampler; `perf` is not permitted on this machine) are flat after the pass: no
+function above 12%, the largest being move execution (`useMove` and below, ~30% together), the
+switch path (`switchIn`, `runSwitch`, building the active state, ~15%), end of turn (~7%) and
+choice commit (~8%). The rest of the gap is the Showdown-shaped control flow kanto keeps on
+purpose (a real action queue, `runAction` tails and `eachEvent` speed-tie checks after every action)
+rather than any single hot spot.
 
 ## Mechanics
 
