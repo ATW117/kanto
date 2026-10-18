@@ -2,6 +2,7 @@
 
 mod generated;
 pub use generated::*;
+pub mod obtainable;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;

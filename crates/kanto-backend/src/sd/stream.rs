@@ -1124,13 +1124,13 @@ impl SdBattle {
             if mon.maybe_locked() {
                 self.choice[p].cant_undo = true;
             }
-            self.choice[p].actions.push(Act::Move { moveid: lid, native: Choice::Move(1) });
+            self.choice[p].actions.push(Act::Move { moveid: lid, native: any_move(b, p) });
             return true;
         } else if matches!(mon.status, st::FRZ | st::SLP) || sd.active.has(v::PARTIALLYTRAPPED) {
             if mon.maybe_locked() {
                 self.choice[p].cant_undo = true;
             }
-            self.choice[p].actions.push(Act::Move { moveid: "fight".into(), native: Choice::Move(1) });
+            self.choice[p].actions.push(Act::Move { moveid: "fight".into(), native: any_move(b, p) });
             return true;
         } else if moves.is_empty() {
             let id = self.ident(p);
@@ -1138,7 +1138,7 @@ impl SdBattle {
             if mon.maybe_locked() {
                 self.choice[p].cant_undo = true;
             }
-            self.choice[p].actions.push(Act::Move { moveid: "struggle".into(), native: Choice::Move(1) });
+            self.choice[p].actions.push(Act::Move { moveid: "struggle".into(), native: any_move(b, p) });
             return true;
         } else if moveid == "testfight" {
             if !mon.maybe_locked() {
@@ -1374,6 +1374,15 @@ impl SdBattle {
         }
         self.win(None);
     }
+}
+
+/// A native `move k` for a locked / 'fight' / Struggle selection: the native simulator resolves
+/// those itself whatever `k` is, but `k` must be one of the request's usable entries (a partially
+/// trapped Pokémon with `maybeLocked` still lists its moves, some possibly disabled).
+fn any_move(b: &Battle, p: usize) -> Choice {
+    let (moves, n, _) = b.request_moves(p);
+    let k = moves[..n].iter().position(|m| !m.disabled).unwrap_or(0);
+    Choice::Move(k as u8 + 1)
 }
 
 /// `Math.round`.

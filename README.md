@@ -174,8 +174,9 @@ directory of them, `"data/teams/gen1ou:train"` /
 `"random"` (random legal learnsets) or `"randbats"` (Showdown's Gen 1 random-battle sets). Teams
 are checked for Gen 1 legality (Species Clause, learnsets, DVs) unless `validate=False`; the
 `[Gen 1] OU` bans (Ubers, Dig/Fly, OHKO and Evasion Clauses) are checked by
-`kanto.validate_team`, which agrees with Showdown's validator on 99.5% of random level-100 teams
-and is never stricter (it lacks Showdown's event-legality checks). The pool is embedded in the
+`kanto.validate_team`, which also ports Showdown's Gen 1 obtainability checks (encounter and
+evolution levels, level-up move levels, events, combination bans) and agreed with Showdown's
+validator on all 22,000 teams of the 2026-10-18 check (random levels and level 100). The pool is embedded in the
 extension, so `TEAMS_TRAIN`/`TEAMS_EVAL` also work from an installed wheel.
 
 `data/teams/gen1ou/teams.jsonl` holds 1,000 teams sampled from Smogon's aggregate Gen 1 OU usage
@@ -239,10 +240,6 @@ tests/                  Rust, Python and C tests
   and request ids come from `kanto.server`, a development server (no authentication, ratings,
   spectators or timer enforcement). `BattleStream` rejects sets whose abilities, items or
   natures Showdown's simulator would apply (kanto models none of them) and random teams.
-- kanto's `[Gen 1] OU` validator is never stricter than Showdown's, but it does not implement
-  Showdown's obtainability checks: minimum encounter and evolution levels, level-up moves above
-  the set's level, event-only moves and move combinations. On 4,000 random-level teams (2026-10-18)
-  it accepted 123 that Showdown rejects.
 - No PyPI release yet: installing builds the Rust extension from source (wheel workflow in
   `.github/workflows/wheels.yml`, untested beyond Linux aarch64).
 

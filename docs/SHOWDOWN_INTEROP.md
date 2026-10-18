@@ -42,13 +42,19 @@ same team (10,172 of 10,172; teams with an all-zero-EV Pokémon are skipped beca
 format writes those EVs as "default").
 
 **Validator.** `validate_team` = kanto's legality checks (Species Clause, Gen 1 learnsets, HP DV)
-plus `[Gen 1] OU`'s bans: Ubers (Mewtwo, Mew), Dig and Fly, OHKO Clause, Evasion Moves Clause,
-Nickname Clause and the "exactly 0 EVs" check. Against `TeamValidator('gen1ou')` on 11,000
-level-100 teams it agrees on 10,950. It is never stricter than Showdown; the 50 teams it accepts
-and Showdown rejects fail Showdown's "Obtainable" checks (event-only moves, move combinations
-from different events, e.g. Kakuna with Poison Sting + Harden). With random levels, Showdown's
-minimum-level checks ("must be at least level 36 to be evolved") add more such cases. For a
-ladder-legal guarantee, run Showdown's validator (data/teams/gen1ou/validate.py does).
+plus `[Gen 1] OU`'s bans (Ubers: Mewtwo, Mew; Dig and Fly; OHKO Clause; Evasion Moves Clause;
+Nickname Clause), the EV sanity checks (exactly 0, 508 or 510 EVs; level 50 with an EV total
+divisible by 4) and Showdown's Gen 1 obtainability checks, ported from `TeamValidator`
+(`tools/gen_obtainable.js` extracts the data): the "Obtainable Moves" combination bans (e.g.
+Kakuna + String Shot + Harden), level-up moves above the set's level (counting pre-evolutions),
+event-only moves (one event must give all of them, no Japan-only events, the event's level), the
+lowest Gen 1 encounter level and the minimum level to be evolved. Messages are Showdown's.
+
+Against `TeamValidator('gen1ou')` (`parity teams`, 2026-10-18) it agrees on every team: 11,000
+teams with random levels (1,000 pool + 10,000 random legal-learnset teams; 7,817 illegal, 3,183
+legal) and 11,000 level-100 teams (7,440 / 3,560). Before the obtainability checks it accepted 123
+of 4,000 random-level teams that Showdown rejects. (kanto does not store shininess, so it cannot
+check that event Pokémon are not shiny; teams it builds are never shiny.)
 
 ## Seeds
 
