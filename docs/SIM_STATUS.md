@@ -372,7 +372,7 @@ not chase). `choices()` for both players went from 25 to 22 ns per update (pkmn:
 
 kanto is still 1.26-1.30x slower per update than pkmn/engine. What was measured and kept (every
 step checked with `cargo test`, the fixtures and 11,000 recorded Showdown battles replayed
-Node-free; final state: a fresh `parity fuzz` of 10,800 battles / 819,833 steps, protocol runs
+Node-free; final state: a fresh `parity fuzz` of 10,800 battles / 823,032 steps, protocol runs
 included, 0 divergences):
 
 - Endless Battle Clause check: an active Pokémon that is not fainted or frozen and has a non-Transform
