@@ -91,6 +91,16 @@ impl BattleStream {
             self.battle = Some(Box::new(SdBattle::new(&opts, clock, &mut out)?));
             return Ok(());
         }
+        const KNOWN: [&str; 21] = [
+            "player", "p1", "p2", "p3", "p4", "forcewin", "forcetie", "forcelose", "reseed", "tiebreak", "chat-inputlogonly", "chat", "eval",
+            "editbattle", "requestlog", "requestexport", "requestteam", "show-openteamsheets", "version", "version-origin", "start",
+        ];
+        if !KNOWN.contains(&ty) {
+            return Err(format!("Error: Unrecognized command \">{ty} {message}\""));
+        }
+        if matches!(ty, "version" | "version-origin") {
+            return Ok(());
+        }
         let keep = self.keep_alive;
         let Some(b) = self.battle.as_mut() else {
             return Err(format!("TypeError: Cannot read properties of null (command >{ty} before >start)"));
@@ -235,6 +245,17 @@ impl BattleTextStream {
             format_message(&mut s, &m);
         }
         Ok(s)
+    }
+}
+
+impl BattleTextStream {
+    /// Like [`BattleTextStream::write`] but returns the messages unformatted (object mode).
+    pub fn write_messages(&mut self, text: &str) -> Result<Vec<String>, String> {
+        self.current.push_str(text);
+        let Some(i) = self.current.rfind('\n') else { return Ok(Vec::new()) };
+        let chunk: String = self.current[..i].to_string();
+        self.current = self.current[i + 1..].to_string();
+        self.stream.write(&chunk)
     }
 }
 

@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 import numpy as np
 
@@ -61,6 +61,26 @@ def move_names() -> list[str]: ...
 def bench_engine(
     battles: int, threads: int = 1, teams: str = "builtin", seed: int = 0, backend: str = "native"
 ) -> tuple[float, int, int]: ...
+
+class BattleStream:
+    """A drop-in for pokemon-showdown's ``BattleStream`` (``[Gen 1] OU``): battle-stream protocol
+    text in (``>start {...}``, ``>player p1 {...}``, ``>p1 move 1``), Showdown's exact output out."""
+
+    def __init__(self, keep_alive: bool = False) -> None: ...
+    def write(self, text: str, messages: bool = False) -> Any:
+        """Run the complete lines of ``text``; return the ``BattleTextStream`` output (``str``), or
+        with ``messages=True`` the list of messages (``"update\\n..."``, ``"sideupdate\\np1\\n..."``)."""
+        ...
+    @property
+    def ended(self) -> bool: ...
+    @property
+    def log(self) -> Optional[List[str]]: ...
+    @property
+    def input_log(self) -> Optional[List[str]]: ...
+
+def simulate_battle(text: str) -> str:
+    """``pokemon-showdown simulate-battle`` on a whole input."""
+    ...
 
 class ProtocolBattle:
     def __init__(
