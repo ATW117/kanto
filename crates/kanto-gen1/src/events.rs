@@ -50,6 +50,9 @@ const SUB_CONDITION: u8 = 2;
 
 /// Volatiles with `DisableMove` handlers.
 const DISABLE_MOVE_VOLS: u32 = 1 << v::PARTIALLYTRAPPED | 1 << v::FAKEPARTIALLYTRAPPED | 1 << v::PARTIALTRAPPINGLOCK | 1 << v::BIDE | 1 << v::DISABLE;
+/// Volatiles with `AfterMoveSelf` / `AfterMove` handlers.
+const AFTER_MOVE_SELF_VOLS: u32 = 1 << v::LEECHSEED | 1 << v::RESIDUALDMG;
+const AFTER_MOVE_VOLS: u32 = 1 << v::PARTIALTRAPPINGLOCK | 1 << v::MUSTRECHARGE | 1 << v::LOCKEDMOVE;
 /// Volatiles with a `duration` (counted down by `fieldEvent('Residual')`).
 const DURATION_VOLS: u32 = 1 << v::FLINCH | 1 << v::PARTIALLYTRAPPED | 1 << v::FAKEPARTIALLYTRAPPED | 1 << v::PARTIALTRAPPINGLOCK;
 
@@ -609,10 +612,16 @@ impl Battle {
     }
 
     /// `runEvent('DisableMove', pokemon)` at end of turn.
+    #[inline(always)]
     pub(crate) fn disable_move_event(&mut self, p: Player) {
         if !matches!(self.sides[p].mon().status, st::SLP | st::FRZ) && self.sides[p].active.vols & DISABLE_MOVE_VOLS == 0 {
             return;
         }
+        self.disable_move_handlers(p);
+    }
+
+    #[inline(never)]
+    fn disable_move_handlers(&mut self, p: Player) {
         let mut list = [(0u64, 0u8); 8];
         let mut n = 0;
         let status = self.sides[p].mon().status;
@@ -681,19 +690,33 @@ impl Battle {
             ids[n] = id;
             n += 1;
         }
-        // Stamps increase with insertion ([`renumber_stamps`] keeps them below 255).
-        if n > 1 {
-            ids[..n].sort_by_key(|&id| a.vstamp[id as usize]);
+        // Stamps increase with insertion ([`renumber_stamps`] keeps them below 255) and are
+        // distinct among present volatiles: an insertion sort by stamp (lists are short).
+        for i in 1..n {
+            let x = ids[i];
+            let k = a.vstamp[x as usize];
+            let mut j = i;
+            while j > 0 && a.vstamp[ids[j - 1] as usize] > k {
+                ids[j] = ids[j - 1];
+                j -= 1;
+            }
+            ids[j] = x;
         }
         VolIter { ids, n, i: 0 }
     }
 
     /// `fieldEvent('Residual')`: duration countdown of Gen 1's duration-based volatiles.
+    #[inline(always)]
     pub(crate) fn residual_event<S: Sink>(&mut self, s: &mut S) {
         // (An unstarted side has no volatiles.)
         if (self.sides[0].active.vols | self.sides[1].active.vols) & DURATION_VOLS == 0 {
             return;
         }
+        self.residual_handlers(s);
+    }
+
+    #[inline(never)]
+    fn residual_handlers<S: Sink>(&mut self, s: &mut S) {
         let mut list = [(0u64, (0u8, 0u8)); 8];
         let mut n = 0;
         for p in 0..2 {
@@ -767,11 +790,17 @@ impl Battle {
     /// `runEvent('AfterMoveSelf', pokemon)`: residualdmg counter (100), sleep wake-up (3),
     /// PSN/BRN/TOX damage (2), Leech Seed (1).
     /// `target` is the event source (the move's target): `[of]` on PSN/BRN damage.
+    #[inline(always)]
     pub(crate) fn after_move_self<S: Sink>(&mut self, p: Player, target: Option<Player>, s: &mut S) {
-        const VOLS: u32 = 1 << v::LEECHSEED | 1 << v::RESIDUALDMG;
-        if !matches!(self.sides[p].mon().status, st::SLP | st::PSN | st::BRN | st::TOX) && self.sides[p].active.vols & VOLS == 0 {
+        if !matches!(self.sides[p].mon().status, st::SLP | st::PSN | st::BRN | st::TOX) && self.sides[p].active.vols & AFTER_MOVE_SELF_VOLS == 0 {
             return;
         }
+        self.after_move_self_handlers(p, target, s);
+    }
+
+    #[inline(never)]
+    fn after_move_self_handlers<S: Sink>(&mut self, p: Player, target: Option<Player>, s: &mut S) {
+        const VOLS: u32 = AFTER_MOVE_SELF_VOLS;
         let mut list = [(0u64, 0u8); 4];
         let mut n = 0;
         let status = self.sides[p].mon().status;
@@ -873,11 +902,17 @@ impl Battle {
 
     /// `runEvent('AfterMove', pokemon, target)`: Wrap lock bookkeeping, Hyper Beam recharge
     /// message, Thrash end. `target_alive` is `target.hp > 0`; the target is always the foe.
+    #[inline(always)]
     pub(crate) fn after_move<S: Sink>(&mut self, p: Player, target: Player, s: &mut S) {
-        const VOLS: u32 = 1 << v::PARTIALTRAPPINGLOCK | 1 << v::MUSTRECHARGE | 1 << v::LOCKEDMOVE;
-        if self.sides[p].active.vols & VOLS == 0 {
+        if self.sides[p].active.vols & AFTER_MOVE_VOLS == 0 {
             return;
         }
+        self.after_move_handlers(p, target, s);
+    }
+
+    #[inline(never)]
+    fn after_move_handlers<S: Sink>(&mut self, p: Player, target: Player, s: &mut S) {
+        const VOLS: u32 = AFTER_MOVE_VOLS;
         let mut list = [(0u64, 0u8); 4];
         let mut n = 0;
         for id in self.vols_in_order(p, VOLS) {

@@ -341,7 +341,14 @@ impl Battle {
         });
         if !self.mid_turn {
             let bt = self.resolve_action(Action::new(ActionKind::BeforeTurn, 0, 0));
-            self.insert_action(bt, None);
+            // insertChoice: the queue is sorted, so when its first action sorts strictly after
+            // BeforeTurn (always: only moves and switches are queued here) it goes in front
+            // without a tie; otherwise take the general path.
+            if self.queue.len == 0 || self.queue.list[0].key() > bt.key() {
+                self.queue.insert(0, bt);
+            } else {
+                self.insert_action(bt, None);
+            }
             let res = self.resolve_action(Action::new(ActionKind::Residual, 0, 0));
             self.queue.push(res);
             self.mid_turn = true;
@@ -526,6 +533,30 @@ impl Battle {
     /// The common tail of `runAction` (faints, forced-switch requests, `eachEvent('Update')`).
     #[inline]
     fn action_tail<S: Sink>(&mut self, _a: Option<Action>, s: &mut S) {
+        // Fast path: nothing fainted, no switch flag and no fainted active: checkFainted and the
+        // switch-flag scan are no-ops, so only `eachEvent('Update')` remains (skipped, like the
+        // rest, when an InstaSwitch is next).
+        if self.n_faint == 0 && !self.ended && self.quiet_actives() {
+            if !matches!(self.queue.peek().map(|a| a.kind), Some(ActionKind::InstaSwitch)) {
+                self.each_event("eachEvent:Update");
+            }
+            return;
+        }
+        self.action_tail_slow(s);
+    }
+
+    /// Neither active is fainted (or both sides are unstarted) and neither has `switchFlag`.
+    #[inline(always)]
+    fn quiet_actives(&self) -> bool {
+        let q = |p: Player| {
+            let sd = &self.sides[p];
+            !sd.active.switch_flag && (sd.active.species == 0 || !sd.mon().fainted())
+        };
+        q(0) && q(1)
+    }
+
+    #[inline(never)]
+    fn action_tail_slow<S: Sink>(&mut self, s: &mut S) {
         if self.n_faint != 0 {
             self.faint_messages(s);
         }

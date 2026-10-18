@@ -267,11 +267,17 @@ impl Battle {
     }
 
     /// `runEvent('BeforeMove', pokemon, target, move)`; false = the move is aborted.
+    #[inline(always)]
     fn before_move<S: Sink>(&mut self, p: Player, target: Player, id: u8, s: &mut S) -> bool {
         // No handler present (no FRZ/SLP/PAR, no BeforeMove volatile): nothing to sort or run.
         if !matches!(self.sides[p].mon().status, st::FRZ | st::SLP | st::PAR) && self.sides[p].active.vols & BEFORE_MOVE_VOLS == 0 {
             return true;
         }
+        self.before_move_handlers(p, target, id, s)
+    }
+
+    #[inline(never)]
+    fn before_move_handlers<S: Sink>(&mut self, p: Player, target: Player, id: u8, s: &mut S) -> bool {
         let mut list = [(0u64, 0u8); 8];
         let mut n = 0;
         let speed = self.sides[p].active.speed;
