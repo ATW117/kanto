@@ -171,8 +171,9 @@ directory of them, `"data/teams/gen1ou:train"` /
 `"random"` (random legal learnsets) or `"randbats"` (Showdown's Gen 1 random-battle sets). Teams
 are checked for Gen 1 legality (Species Clause, learnsets, DVs) unless `validate=False`; the
 `[Gen 1] OU` bans (Ubers, Dig/Fly, OHKO and Evasion Clauses) are checked by
-`kanto.validate_team`, which agrees with Showdown's validator on 99.5% of random level-100 teams
-and is never stricter (it lacks Showdown's event-legality checks). The pool is embedded in the
+`kanto.validate_team`, which also ports Showdown's Gen 1 obtainability checks (encounter and
+evolution levels, level-up move levels, events, combination bans) and agreed with Showdown's
+validator on all 22,000 teams of the 2026-10-18 check (random levels and level 100). The pool is embedded in the
 extension, so `TEAMS_TRAIN`/`TEAMS_EVAL` also work from an installed wheel.
 
 `data/teams/gen1ou/teams.jsonl` holds 1,000 teams sampled from Smogon's aggregate Gen 1 OU usage
