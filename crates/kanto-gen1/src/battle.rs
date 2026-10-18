@@ -361,6 +361,22 @@ impl Battle {
         match c {
             Choice::Switch(k) => Chosen::Switch(self.sides[p].order[k as usize - 1]),
             Choice::Move(k) => {
+                let sd = &mut self.sides[p];
+                if sd.active.vols & (LOCK_VOLS | SEMI_LOCK_VOLS | 1 << v::PARTIALLYTRAPPED) == 0 && !matches!(sd.mon().status, st::FRZ | st::SLP) {
+                    // Common case, the same steps as below: no lock (so the request's side effect
+                    // is only `maybeLocked ||= maybeDisabled`), no 'fight', then Struggle or the
+                    // chosen slot.
+                    let m = sd.mon_mut();
+                    m.set_maybe_locked(m.maybe_locked() || m.maybe_disabled());
+                    if !self.has_valid_move(p) {
+                        return Chosen::Struggle;
+                    }
+                    let sd = &self.sides[p];
+                    assert!(k >= 1 && k <= sd.active.n_slots, "player {p}: no move {k}");
+                    let slot = sd.slot(k as usize - 1);
+                    assert!(!slot.disabled(), "player {p}: move {k} is disabled");
+                    return Chosen::Move { id: slot.id, slot: k - 1 };
+                }
                 // getMoveRequestData's side effects (already applied by makeRequest; idempotent).
                 self.request_side_effects(p);
                 // chooseMove: locked > Gen 1 'fight' > struggle > the chosen slot.
