@@ -57,6 +57,11 @@ fuzzed battle reached could still differ. To check the numbers yourself:
 - `parity/reproduce.sh` re-runs the tables of docs/SIM_STATUS.md with their seeds; specs depend
   only on the seed, so the battle and step counts must come out identical (they did on a re-run
   on 2026-10-16).
+- As a Showdown simulator: `kanto.BattleStream` / `kanto-simulate` take Showdown's battle-stream
+  protocol (`>start`, `>player`, `>p1 move 1`, undo, `>forcewin`, ...) and give byte-identical
+  output to `pokemon-showdown simulate-battle`, choice errors included: 3,000 fuzzed input streams
+  (293,335 input lines, each run three ways) matched with 0 differences
+  (docs/SHOWDOWN_INTEROP.md).
 - Without the harness: `ProtocolBattle.input_log()` writes any kanto battle as a Showdown input
   log, and `parity/showdown/inputlog.js` replays it through an unmodified Showdown `BattleStream`
   (docs/SHOWDOWN_INTEROP.md). 3,000 random battles gave identical logs.
@@ -227,9 +232,14 @@ tests/                  Rust, Python and C tests
   replayed seed-for-seed unless its input log (with the seed) is exported.
 - Showdown 0.11.11 itself crashes ("moveSlot is null") in a rare sleep/freeze + Transform state.
   kanto does not crash there; it does what pkmn/engine does. Those battles have no ground truth.
-- `ProtocolBattle` emits battle messages only; room messages (`|init|`, `|j|`) and request ids
-  come from `kanto.server`, a development server (no authentication, ratings, spectators or
-  timer enforcement).
+- `ProtocolBattle` and `BattleStream` emit battle messages only; room messages (`|init|`, `|j|`)
+  and request ids come from `kanto.server`, a development server (no authentication, ratings,
+  spectators or timer enforcement). `BattleStream` rejects sets whose abilities, items or
+  natures Showdown's simulator would apply (kanto models none of them) and random teams.
+- kanto's `[Gen 1] OU` validator is never stricter than Showdown's, but it does not implement
+  Showdown's obtainability checks: minimum encounter and evolution levels, level-up moves above
+  the set's level, event-only moves and move combinations. On 4,000 random-level teams (2026-10-18)
+  it accepted 123 that Showdown rejects.
 - No PyPI release yet: installing builds the Rust extension from source (wheel workflow in
   `.github/workflows/wheels.yml`, untested beyond Linux aarch64).
 
