@@ -1193,6 +1193,26 @@ impl Battle {
                 }
             }
             Request::Move => {
+                let (a, mon) = (&sd.active, sd.mon());
+                // Common case: not locked, not 'fight' (asleep/frozen/partially trapped): the
+                // usable move slots (or Struggle as `move 1`), as `request_moves` lists them.
+                if a.vols & (LOCK_VOLS | SEMI_LOCK_VOLS | 1 << v::PARTIALLYTRAPPED) == 0 && !matches!(mon.status, st::FRZ | st::SLP) {
+                    for i in 0..(a.n_slots as usize).min(4) {
+                        let s = if a.is_virt(i) { a.vslots[i] } else { mon.moves[i] };
+                        if !s.disabled() && s.pp() > 0 {
+                            out[n] = Choice::Move(i as u8 + 1);
+                            n += 1;
+                        }
+                    }
+                    if n == 0 {
+                        out[0] = Choice::Move(1);
+                        n = 1;
+                    }
+                    if !mon.trapped() {
+                        bench(out, &mut n);
+                    }
+                    return n;
+                }
                 let (moves, m, trapped) = self.request_moves(p);
                 for (i, mv) in moves[..m].iter().enumerate() {
                     if !mv.disabled {

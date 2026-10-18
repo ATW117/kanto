@@ -98,11 +98,9 @@ impl Prng {
                 *s = s.wrapping_mul(LCG_A).wrapping_add(LCG_C);
                 (*s >> 32) as u32
             }
-            Prng::Sodium(key) => {
-                let block = chacha20_block(key, 0, b"LibsodiumDRG");
-                key.copy_from_slice(&block[..32]);
-                u32::from_be_bytes([block[32], block[33], block[34], block[35]])
-            }
+            // Out of line: inlining the ChaCha20 block into every call site bloats the hot
+            // paths of the (common) Gen 5 case.
+            Prng::Sodium(key) => sodium_next(key),
         }
     }
 
@@ -146,6 +144,16 @@ impl Prng {
             start += 1;
         }
     }
+}
+
+/// One sodium `RNG#next`: a ChaCha20 block keyed by the seed; the first 32 bytes are the next
+/// seed, bytes 32..36 (big-endian) the output.
+#[cold]
+#[inline(never)]
+fn sodium_next(key: &mut [u8; 32]) -> u32 {
+    let block = chacha20_block(key, 0, b"LibsodiumDRG");
+    key.copy_from_slice(&block[..32]);
+    u32::from_be_bytes([block[32], block[33], block[34], block[35]])
 }
 
 #[inline(always)]
