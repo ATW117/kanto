@@ -437,9 +437,10 @@ impl Battle {
     // ---- BattleQueue -------------------------------------------------------------------------
 
     /// `resolveAction` + `getActionSpeed`: fill in order, priority and speed.
-    pub(crate) fn resolve_action(&mut self, mut a: Action) -> Action {
-        let p = a.side as usize;
-        a.order = match a.kind {
+    pub(crate) fn resolve_action(&mut self, a: Action) -> Action {
+        let (kind, side, data) = (a.kind(), a.side(), a.data());
+        let p = side as usize;
+        let order = match kind {
             ActionKind::InstaSwitch => 3,
             ActionKind::BeforeTurn => 4,
             ActionKind::RunSwitch => 101,
@@ -447,23 +448,23 @@ impl Battle {
             ActionKind::Move => 200,
             ActionKind::Residual => 300,
         };
-        a.priority = 0;
-        match a.kind {
+        let mut priority = 0;
+        let speed = match kind {
             ActionKind::Move => {
-                if a.data < 166 {
-                    a.priority = MOVES[a.data as usize].priority;
+                if data < 166 {
+                    priority = MOVES[data as usize].priority;
                 }
-                a.speed = self.sides[p].active.modified[4];
+                self.sides[p].active.modified[4]
             }
             ActionKind::Switch | ActionKind::InstaSwitch => {
                 // resolveAction: action.pokemon.switchFlag = false
                 self.sides[p].active.switch_flag = false;
-                a.speed = self.sides[p].active.modified[4];
+                self.sides[p].active.modified[4]
             }
-            ActionKind::RunSwitch => a.speed = self.sides[p].active.modified[4],
-            ActionKind::BeforeTurn | ActionKind::Residual => a.speed = 1,
-        }
-        a
+            ActionKind::RunSwitch => self.sides[p].active.modified[4],
+            ActionKind::BeforeTurn | ActionKind::Residual => 1,
+        };
+        Action::with(kind, side, data, order, priority, speed)
     }
 
     /// `BattleQueue#insertChoice` for an already-resolved action. `pokemon` (side) gets its
@@ -504,17 +505,17 @@ impl Battle {
     // ---- runAction ---------------------------------------------------------------------------
 
     fn run_action<S: Sink>(&mut self, a: Action, s: &mut S) {
-        let p = a.side as usize;
-        match a.kind {
+        let p = a.side() as usize;
+        match a.kind() {
             ActionKind::Move => {
                 // (Showdown also skips actions with a negative speed; Gen 1 speeds are positive.)
                 if self.sides[p].mon().fainted() {
                     return;
                 }
-                self.run_move(p, a.data, s);
+                self.run_move(p, a.data(), s);
             }
             ActionKind::Switch | ActionKind::InstaSwitch => {
-                self.switch_in(p, a.data, a.kind == ActionKind::Switch, s);
+                self.switch_in(p, a.data(), a.kind() == ActionKind::Switch, s);
             }
             ActionKind::RunSwitch => self.run_switch(p, s),
             ActionKind::BeforeTurn => self.each_event("eachEvent:BeforeTurn"),
@@ -537,7 +538,7 @@ impl Battle {
         // switch-flag scan are no-ops, so only `eachEvent('Update')` remains (skipped, like the
         // rest, when an InstaSwitch is next).
         if self.n_faint == 0 && !self.ended && self.quiet_actives() {
-            if !matches!(self.queue.peek().map(|a| a.kind), Some(ActionKind::InstaSwitch)) {
+            if !matches!(self.queue.peek().map(|a| a.kind()), Some(ActionKind::InstaSwitch)) {
                 self.each_event("eachEvent:Update");
             }
             return;
@@ -563,7 +564,7 @@ impl Battle {
         if self.ended {
             return;
         }
-        match self.queue.peek().map(|a| a.kind) {
+        match self.queue.peek().map(|a| a.kind()) {
             None | Some(ActionKind::Move) | Some(ActionKind::Residual) => self.check_fainted(),
             Some(ActionKind::InstaSwitch) => return,
             _ => {}
@@ -678,8 +679,8 @@ impl Battle {
         let mut i = 0;
         while i < self.queue.len as usize {
             let a = self.queue.list[i];
-            let bound = matches!(a.kind, ActionKind::Move | ActionKind::Switch | ActionKind::InstaSwitch | ActionKind::RunSwitch);
-            if bound && a.side as usize == p {
+            let bound = matches!(a.kind(), ActionKind::Move | ActionKind::Switch | ActionKind::InstaSwitch | ActionKind::RunSwitch);
+            if bound && a.side() as usize == p {
                 self.queue.remove(i);
             } else {
                 i += 1;
@@ -772,7 +773,7 @@ impl Battle {
         if self.sides[p].mon().fainted() {
             return false;
         }
-        self.queue.as_slice().iter().any(|a| a.kind == ActionKind::Move && a.side as usize == p)
+        self.queue.as_slice().iter().any(|a| a.kind() == ActionKind::Move && a.side() as usize == p)
     }
 
     /// `queue.changeAction(pokemon, {choice: 'move', moveid})`.
@@ -938,12 +939,17 @@ impl Battle {
             }
             let sd = &mut self.sides[p];
             sd.active.move_this_turn = 0;
-            sd.mon_mut().set_maybe_disabled(false);
-            sd.mon_mut().set_maybe_locked(false);
-            for i in 0..sd.active.n_slots as usize {
-                sd.slot_mut(i).set_disabled(false);
+            let ai = sd.active_slot();
+            sd.mons[ai].flags &= !(mf::MAYBE_DISABLED | mf::MAYBE_LOCKED);
+            // `moveSlot.disabled = false` for each of the active's move slots (base or copy).
+            let (n, virt) = (sd.active.n_slots as usize, sd.active.virt);
+            for i in 0..4 {
+                let here = i < n;
+                let is_virt = virt & (1 << i) != 0;
+                sd.mons[ai].moves[i].set_disabled_if(here && !is_virt, false);
+                sd.active.vslots[i].set_disabled_if(here && is_virt, false);
             }
-            if !sd.mon().fainted() {
+            if !sd.mons[ai].fainted() {
                 self.disable_move_event(p);
             }
             let sd = &mut self.sides[p];

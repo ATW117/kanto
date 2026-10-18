@@ -144,6 +144,13 @@ impl MoveSlot {
         }
     }
 
+    /// `set_disabled(on)` when `cond` holds, without a branch.
+    #[inline(always)]
+    pub fn set_disabled_if(&mut self, cond: bool, on: bool) {
+        let m = (cond as u8) * Self::DISABLED;
+        self.bits = (self.bits & !m) | (m * on as u8 & m);
+    }
+
     /// The packed byte (serialisation).
     #[inline]
     pub const fn bits(&self) -> u8 {
@@ -497,20 +504,12 @@ pub enum ActionKind {
     Residual,
 }
 
-/// A queued action with its resolved `order`, `priority` and `speed` (8 bytes).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Action {
-    pub kind: ActionKind,
-    /// Acting side (for pokemon-bound actions).
-    pub side: u8,
-    /// Move id (Move), or original team slot of the incoming Pokémon (Switch/InstaSwitch/RunSwitch).
-    pub data: u8,
-    pub priority: i8,
-    /// Showdown's `order` (3..=300 for every Gen 1 action).
-    pub order: u16,
-    /// The action's speed (a modified Speed stat, or 1).
-    pub speed: u16,
-}
+/// A queued action with its resolved `order`, `priority` and `speed`, packed into a `u64` whose
+/// upper 48 bits are the `comparePriority` sort key ([`kanto_core::sort::key`] with sub-order 0)
+/// and whose low 16 bits hold the payload: `kind` (bits 0-2), `side` (bit 3), `data` (bits 8-15).
+/// Comparing actions is comparing [`Action::key`]; copying one is a single register move.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Action(u64);
 
 impl Default for Action {
     fn default() -> Self {
@@ -518,17 +517,79 @@ impl Default for Action {
     }
 }
 
+impl std::fmt::Debug for Action {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Action")
+            .field("kind", &self.kind())
+            .field("side", &self.side())
+            .field("data", &self.data())
+            .field("priority", &self.priority())
+            .field("order", &self.order())
+            .field("speed", &self.speed())
+            .finish()
+    }
+}
+
 impl Action {
+    const PAYLOAD: u64 = 0xFFFF;
+
+    /// An action with all fields given.
+    #[inline(always)]
+    pub const fn with(kind: ActionKind, side: u8, data: u8, order: u16, priority: i8, speed: u16) -> Action {
+        Action(kanto_core::sort::key(order, priority, speed, 0) | (data as u64) << 8 | ((side & 1) as u64) << 3 | kind as u64)
+    }
+
     /// An unresolved action (`order`, `priority` and `speed` are filled in by `resolveAction`).
-    #[inline]
+    #[inline(always)]
     pub const fn new(kind: ActionKind, side: u8, data: u8) -> Action {
-        Action { kind, side, data, priority: 0, order: 0, speed: 0 }
+        Action::with(kind, side, data, 0, 0, 0)
     }
 
     /// `comparePriority` key ([`kanto_core::sort::key`]).
     #[inline(always)]
-    pub fn key(&self) -> u64 {
-        kanto_core::sort::key(self.order, self.priority, self.speed, 0)
+    pub const fn key(&self) -> u64 {
+        self.0 & !Self::PAYLOAD
+    }
+
+    #[inline(always)]
+    pub fn kind(&self) -> ActionKind {
+        match self.0 & 7 {
+            0 => ActionKind::BeforeTurn,
+            1 => ActionKind::Move,
+            2 => ActionKind::Switch,
+            3 => ActionKind::InstaSwitch,
+            4 => ActionKind::RunSwitch,
+            _ => ActionKind::Residual,
+        }
+    }
+
+    /// Acting side (for pokemon-bound actions).
+    #[inline(always)]
+    pub const fn side(&self) -> u8 {
+        (self.0 >> 3) as u8 & 1
+    }
+
+    /// Move id (Move), or original team slot of the incoming Pokémon (Switch/InstaSwitch/RunSwitch).
+    #[inline(always)]
+    pub const fn data(&self) -> u8 {
+        (self.0 >> 8) as u8
+    }
+
+    /// Showdown's `order` (3..=300 for every Gen 1 action).
+    #[inline(always)]
+    pub const fn order(&self) -> u16 {
+        (self.0 >> 48) as u16
+    }
+
+    #[inline(always)]
+    pub const fn priority(&self) -> i8 {
+        (127 - ((self.0 >> 40) as u8) as i16) as i8
+    }
+
+    /// The action's speed (a modified Speed stat, or 1).
+    #[inline(always)]
+    pub const fn speed(&self) -> u16 {
+        u16::MAX - (self.0 >> 16) as u16
     }
 }
 

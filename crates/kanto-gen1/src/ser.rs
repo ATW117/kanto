@@ -148,7 +148,29 @@ bin_struct!(Side {
     last_enemy_move, fainted_this_turn, request,
 });
 bin_struct!(Rules { sleep_clause, freeze_clause, compat });
-bin_struct!(Action { kind, order, priority, speed, side, data });
+impl Bin for Action {
+    fn put(&self, o: &mut Vec<u8>) {
+        self.kind().put(o);
+        self.order().put(o);
+        self.priority().put(o);
+        self.speed().put(o);
+        self.side().put(o);
+        self.data().put(o);
+    }
+    fn get(i: &mut &[u8]) -> Option<Self> {
+        let kind = ActionKind::get(i)?;
+        let order = u16::get(i)?;
+        let priority = i8::get(i)?;
+        let speed = u16::get(i)?;
+        let side = u8::get(i)?;
+        let data = u8::get(i)?;
+        // (The packed form keeps one bit of `side`; actions are only ever on side 0 or 1.)
+        if side > 1 {
+            return None;
+        }
+        Some(Action::with(kind, side, data, order, priority, speed))
+    }
+}
 bin_struct!(Queue { len, list });
 bin_struct!(Faint { side, slot });
 impl Bin for Sides {
