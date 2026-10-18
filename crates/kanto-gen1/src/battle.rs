@@ -548,7 +548,7 @@ impl Battle {
     }
 
     /// The common tail of `runAction` (faints, forced-switch requests, `eachEvent('Update')`).
-    #[inline]
+    #[inline(always)]
     fn action_tail<S: Sink>(&mut self, _a: Option<Action>, s: &mut S) {
         // Fast path: nothing fainted, no switch flag and no fainted active: checkFainted and the
         // switch-flag scan are no-ops, so only `eachEvent('Update')` remains (skipped, like the
