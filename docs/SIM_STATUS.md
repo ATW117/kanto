@@ -356,21 +356,21 @@ to an idle Cortex-A725 core (12). `before` = integrate 974b7ce. Medians of 11 ro
 
 | X925, 10,000 games | before | after | after + PGO | pkmn/engine |
 | --- | ---: | ---: | ---: | ---: |
-| randbats update (ns) | 107.0-108.0 [106.1-111.3] | 94.6-95.6 [94.2-97.3] | 90.8-91.5 [90.5-92.8] | 70.9-72.6 [70.0-75.7] |
-| randbats kanto/pkmn update time | 1.48-1.51 | 1.33-1.34 | 1.27-1.28 | 1 |
-| randbats self-play (M turns/s) | 4.89-4.93 | 5.35-5.38 | 5.55-5.58 | 6.33-6.52 |
-| randbats kanto/pkmn turns/s | 0.77 | 0.84 | 0.85-0.86 | 1 |
-| gen1ou pool update (ns) | 111.0-112.0 | 100.4-100.7 | 95.4-96.1 | 73.7-75.3 |
-| gen1ou pool kanto/pkmn update time | 1.49-1.51 | 1.34-1.35 | 1.27-1.29 | 1 |
-| gen1ou pool kanto/pkmn turns/s | 0.76 | 0.81-0.82 | 0.84 | 1 |
+| randbats update (ns) | 106.5-107.4 [106.3-108.1] | 92.0-92.2 [91.4-93.2] | 90.2-91.4 [90.0-92.7] | 70.9-72.4 [70.3-74.7] |
+| randbats kanto/pkmn update time | 1.50-1.51 | 1.27-1.30 | 1.26-1.27 | 1 |
+| randbats self-play (M turns/s) | 4.85-4.87 | 5.37-5.41 | 5.52-5.57 | 6.31-6.42 |
+| randbats kanto/pkmn turns/s | 0.77 | 0.84-0.85 | 0.86-0.87 | 1 |
+| gen1ou pool update (ns) | 112.3-118.6 | 97.2-98.5 | 95.3-95.6 | 74.7-76.8 |
+| gen1ou pool kanto/pkmn update time | 1.50-1.58 | 1.28-1.30 | 1.27 | 1 |
+| gen1ou pool kanto/pkmn turns/s | 0.76 | 0.83-0.84 | 0.85 | 1 |
 
-On the A725 core the ratios are 1.49 -> 1.28 -> 1.23 (randbats update) and 0.79 -> 0.89 -> 0.86
-(turns/s; the PGO profile was trained on X925-like code layout). Within one binary the round-to-round
-spread is about +-1.5% on the X925 cores and +-0.2% on the idle A725 core; between rebuilds of the
-same source, code layout moves the X925 numbers by up to +-2%. `choices()` for both players went
-from 25 to 22 ns per update (pkmn: 17).
+On the A725 core the randbats ratios are 1.49 -> 1.22 -> 1.20 (update) and 0.80 -> 0.92 -> 0.89
+(turns/s). Within one binary the round-to-round spread is about +-1.5% on the X925 cores and
++-0.2% on the idle A725 core; between rebuilds of the same source, code layout moves the X925
+numbers by up to +-2% (one PGO build measured 204 ns on the A725 gen1ou pool, an outlier we did
+not chase). `choices()` for both players went from 25 to 22 ns per update (pkmn: 17).
 
-kanto is still 1.27-1.33x slower per update than pkmn/engine. What was measured and kept (every
+kanto is still 1.26-1.30x slower per update than pkmn/engine. What was measured and kept (every
 step checked with `cargo test`, the fixtures and 11,000 recorded Showdown battles replayed
 Node-free; final state: a fresh `parity fuzz` of 10,800 battles / 819,833 steps, protocol runs
 included, 0 divergences):
@@ -393,6 +393,8 @@ included, 0 divergences):
 - `modifyStat` and the accuracy stage table use integer arithmetic. Unit tests compare them with
   Showdown's floating-point expressions for every `u16` stat and every reachable accuracy value.
   (No measurable speed change: the float code was not hot.)
+- Inlining `chooseMove`, the choice commit, `insertChoice`, `switchIn` and the active-state
+  builder into the turn, and 16-byte aligning the active state (-2 to -4%).
 - PGO (`tools/pgo.sh`, needs `rustup component add llvm-tools`): -4%. It changes code layout and
   inlining only; the parity suite runs unchanged on a PGO build. On the code before this pass PGO
   was within noise.
