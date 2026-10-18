@@ -342,6 +342,7 @@ fn _kanto(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<proto::ProtocolBattle>()?;
     m.add_class::<stream::PyBattleStream>()?;
     m.add_function(wrap_pyfunction!(stream::simulate_battle, m)?)?;
+    m.add_function(wrap_pyfunction!(stream::extract_channel, m)?)?;
     m.add_class::<proto::ProtocolTeams>()?;
     m.add_class::<client::ClientBattle>()?;
     m.add("BACKENDS", BACKENDS.to_vec())?;

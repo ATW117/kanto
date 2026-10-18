@@ -116,6 +116,16 @@ def test_invalid_choices_and_undo():
     assert s.input_log[-2:] == [">p1 move blizzard", ">p2 move bodyslam"]
 
 
+def test_channel_views():
+    s = kanto.BattleStream()
+    msgs = s.write(header(), messages=True)
+    update = next(m for m in msgs if m.startswith("update\n"))[len("update\n"):]
+    p1 = kanto.extract_channel(update, 1).split("\n")
+    spectator = kanto.extract_channel(update, 0).split("\n")
+    assert "|switch|p1a: Tauros|Tauros|290/290" in p1 and "|switch|p2a: Bessie|Snorlax|100/100" in p1
+    assert "|switch|p1a: Tauros|Tauros|100/100" in spectator and not any(l.startswith("|split|") for l in spectator)
+
+
 def test_forcewin_ends_the_stream():
     s = kanto.BattleStream()
     s.write(header())

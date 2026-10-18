@@ -68,3 +68,12 @@ pub fn simulate_battle(text: &str) -> PyResult<String> {
     let mut s = sd::BattleTextStream::new();
     s.write(text).map_err(|e| PyRuntimeError::new_err(e.message))
 }
+
+/// Showdown's ``extractChannelMessages(data, [channel])[channel]``: the lines of an ``update``
+/// message one channel sees (``-1`` omniscient, ``0`` spectator, ``1``/``2`` a player), as
+/// ``getPlayerStreams`` splits them.
+#[pyfunction]
+pub fn extract_channel(data: &str, channel: i32) -> String {
+    let lines: Vec<String> = data.split('\n').map(str::to_string).collect();
+    kanto_core::proto::extract_channel(&lines, channel).join("\n")
+}

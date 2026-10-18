@@ -78,6 +78,11 @@ class BattleStream:
     @property
     def input_log(self) -> Optional[List[str]]: ...
 
+def extract_channel(data: str, channel: int) -> str:
+    """Showdown's ``extractChannelMessages``: an ``update`` as channel -1 (omniscient), 0
+    (spectator) or 1/2 (a player) sees it."""
+    ...
+
 def simulate_battle(text: str) -> str:
     """``pokemon-showdown simulate-battle`` on a whole input."""
     ...
