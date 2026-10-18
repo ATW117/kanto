@@ -565,3 +565,155 @@ pub fn native_only(n: usize, seed: u64, teams: &str) {
     let secs = t0.elapsed().as_secs_f64();
     println!("native only: {turns} turns, {:.0} turns/s", turns as f64 / secs);
 }
+
+#[cfg(feature = "pkmn")]
+/// Interleaved head-to-head (native vanilla vs pkmn/engine), for noisy shared machines: each
+/// engine's choice sequences are recorded once, then `reps` rounds alternate between replaying
+/// all of pkmn's games and all of the native games (update only), and then between full plays
+/// (update + choices + the uniform policy, the `compare` turns/s). Both engines see the same
+/// load in every round. Prints every round and the median, min and max.
+pub fn h2h(n: usize, seed: u64, teams: &str, reps: usize) {
+    use std::hint::black_box;
+    let source = TeamSource::from_spec(teams).unwrap_or_else(|e| panic!("{e}"));
+    let gs = games(&source, n, seed);
+    let starts_n: Vec<Battle> = gs.iter().map(|g| kanto_backend::new_battle(&g.0, &g.1, g.2, Rules::OU)).collect();
+    let starts_p: Vec<Gen1Battle> = gs.iter().map(|g| Pkmn1::new_battle(&g.0, &g.1, g.2)).collect();
+    let (mut traj_n, mut traj_p) = (Vec::with_capacity(n), Vec::with_capacity(n));
+    let (mut turns_n, mut turns_p) = (0u64, 0u64);
+    for (i, g) in gs.iter().enumerate() {
+        let t = record_native(&starts_n[i], g.3);
+        let mut b = starts_n[i];
+        for &(c1, c2) in &t {
+            b.apply_choices_unchecked(c1, c2, &mut ());
+        }
+        turns_n += b.turn as u64;
+        traj_n.push(t);
+        let mut b = starts_p[i];
+        let mut cs = Vec::new();
+        turns_p += play_pkmn_raw(&mut b, g.3, &mut cs).0 as u64;
+        traj_p.push(cs);
+    }
+    let (upd_n, upd_p): (usize, usize) = (traj_n.iter().map(Vec::len).sum(), traj_p.iter().map(Vec::len).sum());
+    let replay_n = || {
+        let t0 = Instant::now();
+        for (i, t) in traj_n.iter().enumerate() {
+            let mut b = starts_n[i];
+            for &(c1, c2) in t {
+                b.apply_choices_unchecked(black_box(c1), black_box(c2), &mut ());
+            }
+            black_box(&b);
+        }
+        t0.elapsed().as_secs_f64()
+    };
+    let replay_p = || {
+        let t0 = Instant::now();
+        for (i, t) in traj_p.iter().enumerate() {
+            let mut b = starts_p[i];
+            for &(c1, c2) in t {
+                unsafe { pkmn_sys::pkmn_gen1_battle_update(&mut b.raw, black_box(c1), black_box(c2), std::ptr::null_mut()) };
+            }
+            black_box(&b);
+        }
+        t0.elapsed().as_secs_f64()
+    };
+    let play_n = || {
+        let t0 = Instant::now();
+        for (i, g) in gs.iter().enumerate() {
+            let mut b = starts_n[i];
+            black_box(play_native(&mut b, g.3, |_| {}));
+        }
+        t0.elapsed().as_secs_f64()
+    };
+    let play_p = || {
+        let t0 = Instant::now();
+        for (i, g) in gs.iter().enumerate() {
+            let mut b = starts_p[i];
+            black_box(play_pkmn(&mut b, g.3, |_| {}));
+        }
+        t0.elapsed().as_secs_f64()
+    };
+    // Warm-up round.
+    replay_p();
+    replay_n();
+    let (mut un, mut up, mut tn, mut tp) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    println!("== h2h ({teams}, {n} games, seed {seed}; native {upd_n} updates / {turns_n} turns, pkmn {upd_p} updates / {turns_p} turns)");
+    for r in 0..reps {
+        // Alternate which engine goes first.
+        let (a, b) = if r % 2 == 0 { let p = replay_p(); (p, replay_n()) } else { let x = replay_n(); (replay_p(), x) };
+        up.push(a * 1e9 / upd_p as f64);
+        un.push(b * 1e9 / upd_n as f64);
+        let (a, b) = if r % 2 == 0 { let p = play_p(); (p, play_n()) } else { let x = play_n(); (play_p(), x) };
+        tp.push(turns_p as f64 / a / 1e6);
+        tn.push(turns_n as f64 / b / 1e6);
+        println!("  round {r:2}: update ns  pkmn {:6.1}  native {:6.1}  | play Mturns/s  pkmn {:5.2}  native {:5.2}", up[r], un[r], tp[r], tn[r]);
+    }
+    let stat = |v: &Vec<f64>| {
+        let mut s = v.clone();
+        s.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        (s[s.len() / 2], s[0], s[s.len() - 1])
+    };
+    let ratios_u: Vec<f64> = un.iter().zip(&up).map(|(n, p)| n / p).collect();
+    let ratios_t: Vec<f64> = tn.iter().zip(&tp).map(|(n, p)| n / p).collect();
+    for (name, v) in [("update ns  pkmn", &up), ("update ns  native", &un), ("native/pkmn update-time ratio", &ratios_u), ("play Mturns/s pkmn", &tp), ("play Mturns/s native", &tn), ("native/pkmn turns/s ratio", &ratios_t)] {
+        let (m, lo, hi) = stat(v);
+        println!("  {name:32} median {m:7.3}  min {lo:7.3}  max {hi:7.3}");
+    }
+}
+
+/// The native choice sequence of one game under the bench policy.
+fn record_native(start: &Battle, seed: u64) -> Vec<(Choice, Choice)> {
+    use kanto_core::Generation;
+    let mut b = *start;
+    let mut t = Vec::new();
+    let mut rng = Rng::new(seed);
+    let mut ch = [Choice::Pass; 16];
+    let (mut c1, mut c2) = (Choice::Pass, Choice::Pass);
+    loop {
+        b.apply_choices_unchecked(c1, c2, &mut ());
+        t.push((c1, c2));
+        if b.ended || b.turn as u32 >= MAX_TURNS {
+            return t;
+        }
+        let mut cs = [Choice::Pass; 2];
+        for p in 0..2 {
+            let n = b.choices(p, &mut ch);
+            let mut idx = Idx::new();
+            for i in 0..n {
+                idx.push((native_action(&b, p, ch[i]).index(), i));
+            }
+            cs[p] = ch[idx.pick(&mut rng)];
+        }
+        c1 = cs[0];
+        c2 = cs[1];
+    }
+}
+
+#[cfg(feature = "pkmn")]
+/// One pkmn game under the bench policy, recording the raw choice bytes.
+fn play_pkmn_raw(b: &mut Gen1Battle, seed: u64, out: &mut Vec<(u8, u8)>) -> (u32, u64, u8) {
+    let mut rng = Rng::new(seed);
+    let mut ch = [0u8; 16];
+    let (mut c1, mut c2) = (0u8, 0u8);
+    let mut updates = 0;
+    loop {
+        let r = unsafe { pkmn_sys::pkmn_gen1_battle_update(&mut b.raw, c1, c2, std::ptr::null_mut()) };
+        b.result = r;
+        out.push((c1, c2));
+        updates += 1;
+        let kind = pkmn_sys::bits::result_kind(r);
+        if kind != 0 || Pkmn1::turn(b) >= MAX_TURNS {
+            return (Pkmn1::turn(b), updates, kind);
+        }
+        let mut cs = [0u8; 2];
+        for p in 0..2 {
+            let n = Pkmn1::choices(b, p, &mut ch);
+            let mut idx = Idx::new();
+            for i in 0..n {
+                idx.push((Pkmn1::action_of(b, p, ch[i]).index(), i));
+            }
+            cs[p] = ch[idx.pick(&mut rng)];
+        }
+        c1 = cs[0];
+        c2 = cs[1];
+    }
+}

@@ -6,6 +6,8 @@
 //! - `compare` (default): native (vanilla and pkmn-patched) turns/s, and pkmn/engine with
 //!   `--features pkmn`.
 //! - `breakdown`: native timing breakdown (update, choices, state copy, blob encode/decode).
+//! - `h2h` (needs `--features pkmn`; optional 5th arg = rounds): native vs pkmn/engine,
+//!   interleaved round by round so both see the same machine load; median/min/max.
 //! - `native`: only the native games (vanilla), e.g. under `valgrind --tool=callgrind`.
 //!
 //! Built from this crate (not kanto-parity) so the PRNG call tracing feature is compiled out.
@@ -34,6 +36,8 @@ fn main() {
             bench::breakdown(n, seed, &teams, kanto_gen1::Compat::Pkmn, 5);
         }
         "native" => bench::native_only(n, seed, &teams),
+        #[cfg(feature = "pkmn")]
+        "h2h" => bench::h2h(n, seed, &teams, args.get(4).map(|s| s.parse().expect("reps")).unwrap_or(11)),
         m => panic!("unknown mode {m} (compare | breakdown | native)"),
     }
 }
