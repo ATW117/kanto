@@ -10,6 +10,7 @@
 //! parity mutscan  <dump.jsonl>...                   (Node-free replay of `fuzz --dump` traces)
 //! parity shrink   <failures.jsonl>...
 //! parity bench    [--battles N] [--seed S]
+//! parity stream-fuzz [--battles N] [--seed S] [--jobs J] [--out DIR] [--record FILE]  (BattleStream text protocol vs Showdown)
 //! parity teams    [--random N] [--seed S] [--level100]  (Showdown team formats + gen1ou validator)
 //! parity diff-pkmn [--battles N] [--teams T] [--compat pkmn|vanilla]
 //! ```
@@ -21,6 +22,7 @@ mod replay;
 mod runner;
 mod snapshot;
 mod spec;
+mod streamfuzz;
 mod teams;
 
 use kanto_env::rng::Rng;
@@ -118,6 +120,16 @@ fn main() {
         "mutscan" => mutscan(&args),
         "regen" => regen(&args),
         "proto-corpus" => proto_corpus(&args),
+        "stream-fuzz" => {
+            let repo = repo_root();
+            let sd = runner::Showdown::locate(&repo, args.kv.get("ps-dir").map(|s| s.as_str())).unwrap_or_else(|e| panic!("{e}"));
+            let out = PathBuf::from(args.get("out", "parity/out/stream-fuzz"));
+            let record = args.kv.get("record").map(PathBuf::from);
+            let d = streamfuzz::run(args.num("battles", 200) as usize, args.num("seed", 1), args.num("jobs", 4) as usize, &out, &sd, record.as_deref());
+            if d > 0 {
+                std::process::exit(1);
+            }
+        }
         "teams" => {
             let ps = args.kv.get("ps").cloned();
             if let Err(e) = teams::run(&repo_root(), args.num("random", 5000) as usize, args.num("seed", 1), args.flag("level100"), ps.as_deref()) {
@@ -509,6 +521,16 @@ fn fixtures(args: &Args) {
             }
         }
         println!("{sub}: {ok} match, {div} diverge ({} files)", files.len());
+    }
+    // BattleStream text-protocol corpora (`stream-fuzz --record`).
+    if let Ok(rd) = std::fs::read_dir(dir.join("stream")) {
+        let mut files: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "jsonl")).collect();
+        files.sort();
+        for p in files {
+            let (n, b) = streamfuzz::replay_corpus(&p);
+            bad += b;
+            println!("stream/{}: {n} runs, {} match", p.file_name().unwrap().to_string_lossy(), n - b);
+        }
     }
     // Compact corpora (Node-free regression replays).
     if let Ok(rd) = std::fs::read_dir(&dir) {

@@ -999,7 +999,7 @@ impl Battle {
 
     /// `Pokemon#getLockedMove` (LockMove handlers in volatile insertion order).
     #[inline]
-    pub(crate) fn locked_move(&self, p: Player) -> Option<u8> {
+    pub fn locked_move(&self, p: Player) -> Option<u8> {
         let a = &self.sides[p].active;
         if a.vols & LOCK_VOLS == 0 {
             return None;
@@ -1020,7 +1020,7 @@ impl Battle {
 
     /// `Pokemon#getSemiLockedMove(restrictData)`.
     #[inline]
-    pub(crate) fn semi_locked_move(&self, p: Player, restrict: bool) -> Option<u8> {
+    pub fn semi_locked_move(&self, p: Player, restrict: bool) -> Option<u8> {
         let a = &self.sides[p].active;
         if a.vols & SEMI_LOCK_VOLS == 0 || (restrict && self.sides[p].mon().maybe_locked()) {
             return None;

@@ -85,14 +85,14 @@ impl Battle {
     }
 
     /// `pokemon.details`: species name, `, L<level>` below 100 (Gen 1 has no gender).
-    pub(crate) fn details(&self, p: Player, slot: usize) -> String {
+    pub(crate) fn details(&self, l: &Log, p: Player, slot: usize) -> String {
         let m = &self.sides[p].mons[slot.min(MAX_TEAM - 1)];
         let name = SPECIES[m.species as usize].name;
-        if m.level == 100 {
-            name.to_string()
-        } else {
-            format!("{name}, L{}", m.level)
+        let mut d = if m.level == 100 { name.to_string() } else { format!("{name}, L{}", m.level) };
+        if let Some(x) = l.extra(p, slot) {
+            d.push_str(&x.details_suffix);
         }
+        d
     }
 
     /// `pokemon.getHealth()`: (secret `hp/maxhp[ status]`, shared `pct/100[ status]`) under HP
@@ -132,7 +132,7 @@ impl Battle {
     pub(crate) fn add_switch(&self, l: &mut Log, p: Player) {
         let slot = self.sides[p].active_slot();
         let id = self.ident(l, p);
-        let det = self.details(p, slot);
+        let det = self.details(l, p, slot);
         let (secret, shared) = self.health(p, slot);
         l.add_split(p, format!("|switch|{id}|{det}|{secret}"), Some(format!("|switch|{id}|{det}|{shared}")));
     }
@@ -145,8 +145,18 @@ impl Battle {
         for p in 0..2 {
             l.add(format!("|player|p{}|{}||", p + 1, l.player_names[p]));
         }
+        self.write_format_header(l, None);
+    }
+
+    /// The part of the header `Battle#start` writes once both players joined: `|gen|`, `|tier|`,
+    /// `|rated|` (`rated` = its message, if the battle is rated), the `|rule|` lines and the
+    /// custom-rules `|raw|` box.
+    pub fn write_format_header(&self, l: &mut Log, rated: Option<&str>) {
         l.add("|gen|1".into());
         l.add("|tier|[Gen 1] OU".into());
+        if let Some(r) = rated {
+            l.add(format!("|rated|{r}"));
+        }
         l.add("|rule|Desync Clause Mod: Desyncs resolve to link battle behavior from the acting player's perspective.".into());
         l.add("|rule|HP Percentage Mod: HP is shown in percentages".into());
         l.add("|rule|Endless Battle Clause: Forcing endless battles is banned".into());
@@ -292,7 +302,7 @@ impl Battle {
             out.push_str("{\"ident\":");
             json_str(out, &self.fullname(l, p, slot));
             out.push_str(",\"details\":");
-            json_str(out, &self.details(p, slot));
+            json_str(out, &self.details(l, p, slot));
             out.push_str(",\"condition\":");
             json_str(out, &self.health(p, slot).0);
             let _ = write!(
@@ -314,7 +324,14 @@ impl Battle {
                 let id = if active { sd.slot(i).id } else { m.moves[i].id };
                 let _ = write!(out, "\"{}\"", move_id_str(id));
             }
-            out.push_str("],\"baseAbility\":\"\",\"item\":\"\",\"pokeball\":\"pokeball\"}");
+            let x = l.extra(p, slot);
+            out.push_str("],\"baseAbility\":");
+            json_str(out, x.map_or("", |x| x.ability.as_str()));
+            out.push_str(",\"item\":");
+            json_str(out, x.map_or("", |x| x.item.as_str()));
+            out.push_str(",\"pokeball\":");
+            json_str(out, x.map(|x| x.pokeball.as_str()).filter(|b| !b.is_empty()).unwrap_or("pokeball"));
+            out.push('}');
         }
         out.push_str("]}");
     }
