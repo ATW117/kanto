@@ -81,6 +81,25 @@ static NOMOVE_DATA: std::sync::LazyLock<kanto_data::MoveData> = std::sync::LazyL
     d
 });
 
+/// Accuracy stage multipliers in percent (index = stage + 6).
+const ACC_TABLE: [i64; 13] = [25, 28, 33, 40, 50, 66, 100, 150, 200, 250, 300, 350, 400];
+
+/// `floor(acc * ACC_TABLE[i] / 100)` (Showdown multiplies by the float `ACC_TABLE[i] / 100`;
+/// `tests::accuracy_integer_forms_are_exact` checks the two agree on every reachable value).
+#[inline(always)]
+fn acc_stage(acc: i64, i: usize) -> i64 {
+    acc * ACC_TABLE[i] / 100
+}
+
+/// `floor(accuracy * 255 / 100)` for an accuracy in percent.
+#[inline(always)]
+const fn acc255(pct: u8) -> u16 {
+    pct as u16 * 255 / 100
+}
+
+/// The "no move" accuracy, `100 * 81 / 256` percent (31.640625%), on the 0-255 scale.
+const NOMOVE_ACC255: u16 = 80;
+
 const TYPE_NORMAL: u8 = 0;
 const TYPE_FIGHTING: u8 = 1;
 const TYPE_GHOST: u8 = 7;
@@ -92,8 +111,8 @@ pub(crate) struct Mv {
     /// Move id; `pm::NOMOVE_HACK` for Gen 1's "no move" Fissure-alike.
     pub id: u8,
     pub d: &'static kanto_data::MoveData,
-    /// Accuracy in percent (`None` = `true`).
-    pub accuracy: Option<f64>,
+    /// Accuracy on Showdown's 0-255 scale, `floor(accuracy% * 255 / 100)` (`None` = `true`).
+    pub accuracy: Option<u16>,
     pub hit: u8,
     pub last_hit: bool,
     /// `move.damage` set by multi-hit moves after the first hit.
@@ -103,10 +122,10 @@ pub(crate) struct Mv {
 impl Mv {
     pub fn new(id: u8) -> Mv {
         if id == pm::NOMOVE {
-            return Mv { id: pm::NOMOVE_HACK, d: &NOMOVE_DATA, accuracy: Some(100.0 * 81.0 / 256.0), hit: 0, last_hit: false, fixed: None };
+            return Mv { id: pm::NOMOVE_HACK, d: &NOMOVE_DATA, accuracy: Some(NOMOVE_ACC255), hit: 0, last_hit: false, fixed: None };
         }
         let d = &MOVES[id as usize];
-        let accuracy = if d.accuracy == 0 { None } else { Some(d.accuracy as f64) };
+        let accuracy = if d.accuracy == 0 { None } else { Some(acc255(d.accuracy)) };
         Mv { id, d, accuracy, hit: 0, last_hit: false, fixed: None }
     }
 
@@ -609,8 +628,7 @@ impl Battle {
         }
         let mut acc_int: Option<i64> = None;
         if let Some(a) = accuracy {
-            const TABLE: [f64; 13] = [25.0, 28.0, 33.0, 40.0, 50.0, 66.0, 100.0, 150.0, 200.0, 250.0, 300.0, 350.0, 400.0];
-            let mut acc = (a * 255.0 / 100.0).floor() as i64;
+            let mut acc = a as i64;
             let ua = &self.sides[p].active;
             if ua.has(v::LOCKEDMOVE) {
                 acc = ua.lockedmove_acc as i64;
@@ -619,9 +637,9 @@ impl Battle {
                 acc = ua.rage_acc as i64;
             }
             let ab = (ua.boosts[5] + 6) as usize;
-            acc = (acc as f64 * (TABLE[ab] / 100.0)).floor() as i64;
+            acc = acc_stage(acc, ab);
             let eb = (6 - self.sides[t].active.boosts[6]) as usize;
-            acc = (acc as f64 * (TABLE[eb] / 100.0)).floor() as i64;
+            acc = acc_stage(acc, eb);
             acc = acc.clamp(1, 255);
             let ua = &mut self.sides[p].active;
             if ua.has(v::LOCKEDMOVE) {
@@ -806,11 +824,11 @@ impl Battle {
                 match self.sides[q].mon().status {
                     st::PAR => {
                         let a = &mut self.sides[q].active;
-                        a.modified[4] = crate::battle::modify_stat(a.modified[4], 0.25);
+                        a.modified[4] = crate::battle::quarter_stat(a.modified[4]);
                     }
                     st::BRN => {
                         let a = &mut self.sides[q].active;
-                        a.modified[0] = crate::battle::modify_stat(a.modified[0], 0.5);
+                        a.modified[0] = crate::battle::half_stat(a.modified[0]);
                     }
                     _ => {}
                 }
@@ -825,10 +843,10 @@ impl Battle {
                     if self.set_status(t, status, p, false, md == Md::Main, m.real_id(), s) {
                         let a = &mut self.sides[t].active;
                         if status == st::BRN {
-                            a.modified[0] = crate::battle::modify_stat(a.modified[0], 0.5);
+                            a.modified[0] = crate::battle::half_stat(a.modified[0]);
                         }
                         if status == st::PAR {
-                            a.modified[4] = crate::battle::modify_stat(a.modified[4], 0.25);
+                            a.modified[4] = crate::battle::quarter_stat(a.modified[4]);
                         }
                     }
                 } else if !is_secondary {
@@ -1426,5 +1444,26 @@ fn data_vol(d: u8) -> u8 {
         vol::MUSTRECHARGE => v::MUSTRECHARGE,
         vol::RAGE => v::RAGE,
         _ => panic!("unknown volatile {d}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The integer accuracy arithmetic equals Showdown's floating-point version.
+    #[test]
+    fn accuracy_integer_forms_are_exact() {
+        for pct in 0..=255u16 {
+            assert_eq!(acc255(pct as u8) as i64, (pct as f64 * 255.0 / 100.0).floor() as i64, "{pct}");
+        }
+        assert_eq!(NOMOVE_ACC255 as i64, ((100.0 * 81.0 / 256.0) * 255.0 / 100.0f64).floor() as i64);
+        const TABLE: [f64; 13] = [25.0, 28.0, 33.0, 40.0, 50.0, 66.0, 100.0, 150.0, 200.0, 250.0, 300.0, 350.0, 400.0];
+        // acc <= 255 before the first stage, <= 1020 before the second.
+        for acc in 0..=1100i64 {
+            for (i, t) in TABLE.iter().enumerate() {
+                assert_eq!(acc_stage(acc, i), (acc as f64 * (t / 100.0)).floor() as i64, "{acc} {i}");
+            }
+        }
     }
 }

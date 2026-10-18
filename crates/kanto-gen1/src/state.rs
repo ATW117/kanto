@@ -250,10 +250,10 @@ impl Mon {
     pub fn bench_modified(&self) -> [u16; 5] {
         let mut m = [self.stats[1], self.stats[2], self.stats[3], self.stats[4], self.stats[5]];
         if self.bench_par() {
-            m[4] = crate::battle::modify_stat(m[4], 0.25);
+            m[4] = crate::battle::quarter_stat(m[4]);
         }
         if self.bench_brn() {
-            m[0] = crate::battle::modify_stat(m[0], 0.5);
+            m[0] = crate::battle::half_stat(m[0]);
         }
         m
     }

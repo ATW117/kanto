@@ -130,7 +130,7 @@ fn play_native_c(b: &mut Battle, seed: u64, mut on_update: impl FnMut(&Battle), 
     }
 }
 
-fn games(source: &TeamSource, n: usize, seed: u64) -> Vec<(Team, Team, u64, u64)> {
+pub fn games(source: &TeamSource, n: usize, seed: u64) -> Vec<(Team, Team, u64, u64)> {
     (0..n)
         .map(|i| {
             let mut rng = Rng::new(derive_seed(seed, i as u64));
@@ -661,7 +661,7 @@ pub fn h2h(n: usize, seed: u64, teams: &str, reps: usize) {
 }
 
 /// The native choice sequence of one game under the bench policy.
-fn record_native(start: &Battle, seed: u64) -> Vec<(Choice, Choice)> {
+pub fn record_native(start: &Battle, seed: u64) -> Vec<(Choice, Choice)> {
     use kanto_core::Generation;
     let mut b = *start;
     let mut t = Vec::new();

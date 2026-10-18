@@ -3,7 +3,7 @@
 //! collected with their (order, priority, speed, subOrder) keys and sorted with Showdown's
 //! `speedSort`, so ties consume the PRNG exactly as in Showdown.
 
-use crate::battle::modify_stat;
+use crate::battle::boosted_stat;
 use crate::proto::{plog, BOOST_NAMES};
 use crate::state::*;
 use kanto_core::sort::{key, sort_by_key, KEY_ORDER_UNSET};
@@ -585,11 +585,7 @@ impl Battle {
         if changed == BoostResult::Changed {
             a.modified[i] = a.stored[i];
             let bst = a.boosts[i];
-            a.modified[i] = if bst >= 0 {
-                modify_stat(a.modified[i], [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0][bst as usize])
-            } else {
-                modify_stat(a.modified[i], [100.0, 66.0, 50.0, 40.0, 33.0, 28.0, 25.0][(-bst) as usize] / 100.0)
-            };
+            a.modified[i] = boosted_stat(a.modified[i], bst);
             if delta > 0 && a.modified[i] > 999 {
                 a.modified[i] = 999;
             }

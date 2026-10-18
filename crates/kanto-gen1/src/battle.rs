@@ -618,7 +618,9 @@ impl Battle {
             if alive {
                 // BeforeSwitchOut / SwitchOut: no Gen 1 handlers. cancelAction(oldActive).
                 self.cancel_action(p);
-                self.clear_volatile(p, true);
+                // clearVolatile: only its effect on the Pokémon itself survives (`init_active`
+                // below rebuilds the active state from the incoming Pokémon).
+                self.clear_volatile_mon(p);
             }
             if self.sides[p].mons[out].fainted() {
                 self.sides[p].mons[out].status = st::NONE;
@@ -675,11 +677,9 @@ impl Battle {
     /// the bench copy keeps modified stats with burn/paralysis drops re-applied, and `speed`
     /// becomes the unmodified Speed stat.
     pub(crate) fn clear_volatile(&mut self, p: Player, _include_switch_flags: bool) {
+        self.clear_volatile_mon(p);
         let sd = &mut self.sides[p];
-        let i = sd.order[0] as usize;
-        let m = &mut sd.mons[i];
-        m.set_bench_par(m.status == st::PAR);
-        m.set_bench_brn(m.status == st::BRN);
+        let m = &sd.mons[sd.active_slot()];
         let modified = m.bench_modified();
         let sp = &SPECIES[m.species as usize];
         sd.active = Active {
@@ -691,6 +691,15 @@ impl Battle {
             n_slots: m.n_moves,
             ..Active::default()
         };
+    }
+
+    /// The part of [`Battle::clear_volatile`] that persists on the Pokémon (the bench copy's
+    /// paralysis/burn drops).
+    #[inline]
+    fn clear_volatile_mon(&mut self, p: Player) {
+        let m = self.sides[p].mon_mut();
+        m.set_bench_par(m.status == st::PAR);
+        m.set_bench_brn(m.status == st::BRN);
     }
 
     /// `BattleActions#runSwitch` (Gen 4 mod, inherited by Gen 1).
@@ -943,6 +952,21 @@ impl Battle {
 
     /// Gen 1 Endless Battle Clause check (`maybeTriggerEndlessBattleClause`).
     fn endless_battle_check<S: Sink>(&mut self, s: &mut S) -> bool {
+        // Fast reject (the common case): an active Pokémon that is neither fainted nor frozen
+        // and has a move other than Transform and a move with PP fails the per-Pokémon test
+        // below whatever the foe has, so its side is not stuck and neither is the battle.
+        let free = |p: Player| {
+            let sd = &self.sides[p];
+            let i = sd.active_slot();
+            let m = &sd.mons[i];
+            !m.fainted()
+                && m.status != st::FRZ
+                && !self.mon_slots_all(p, i, |s| s.id == data::mv::TRANSFORM)
+                && !self.mon_slots_all(p, i, |s| s.pp() == 0)
+        };
+        if free(0) || free(1) {
+            return false;
+        }
         // (The foe-wide conditions are pure, so they are evaluated only when needed.)
         let stuck = (0..2).all(|p| {
             let q = 1 - p;
@@ -1239,7 +1263,65 @@ impl Side {
 }
 
 /// `modifyStat`: `max(1, floor(stat * modifier))` in floating point, as Showdown computes it.
-#[inline]
+/// The simulator uses the integer forms below; `tests::modify_stat_integer_forms_are_exact`
+/// checks them against this for every `u16` stat.
+#[cfg(test)]
 pub(crate) fn modify_stat(stat: u16, modifier: f64) -> u16 {
     ((stat as f64 * modifier).floor() as i64).max(1) as u16
+}
+
+/// `modifyStat(stat, num / den)` in integers (`max(1, ..)`, truncated to `u16` like the float
+/// version's cast).
+#[inline(always)]
+pub(crate) fn modify_stat_ratio(stat: u16, num: u32, den: u32) -> u16 {
+    (stat as u32 * num / den).max(1) as u16
+}
+
+/// `modifyStat(stat, 0.25)`: the paralysis Speed drop.
+#[inline(always)]
+pub(crate) fn quarter_stat(stat: u16) -> u16 {
+    (stat / 4).max(1)
+}
+
+/// `modifyStat(stat, 0.5)`: the burn Attack drop.
+#[inline(always)]
+pub(crate) fn half_stat(stat: u16) -> u16 {
+    (stat / 2).max(1)
+}
+
+/// Gen 1 stat-stage multipliers as `(numerator, denominator)`: boosts 0..=6 are
+/// `[1, 1.5, 2, 2.5, 3, 3.5, 4]`, drops 1..=6 are `[66, 50, 40, 33, 28, 25] / 100`.
+pub(crate) const BOOST_POS: [u32; 7] = [2, 3, 4, 5, 6, 7, 8];
+pub(crate) const BOOST_NEG: [u32; 7] = [100, 66, 50, 40, 33, 28, 25];
+
+/// The modified stat for stage `bst` (-6..=6) of `stat` (`boostBy`'s recalculation).
+#[inline(always)]
+pub(crate) fn boosted_stat(stat: u16, bst: i8) -> u16 {
+    if bst >= 0 {
+        modify_stat_ratio(stat, BOOST_POS[bst as usize], 2)
+    } else {
+        modify_stat_ratio(stat, BOOST_NEG[(-bst) as usize], 100)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The integer stat modifiers equal Showdown's floating-point `modifyStat` for every stat.
+    #[test]
+    fn modify_stat_integer_forms_are_exact() {
+        for stat in 0..=u16::MAX {
+            assert_eq!(quarter_stat(stat), modify_stat(stat, 0.25), "{stat}");
+            assert_eq!(half_stat(stat), modify_stat(stat, 0.5), "{stat}");
+            for bst in -6i8..=6 {
+                let f = if bst >= 0 {
+                    modify_stat(stat, [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0][bst as usize])
+                } else {
+                    modify_stat(stat, [100.0, 66.0, 50.0, 40.0, 33.0, 28.0, 25.0][(-bst) as usize] / 100.0)
+                };
+                assert_eq!(boosted_stat(stat, bst), f, "{stat} {bst}");
+            }
+        }
+    }
 }
