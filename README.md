@@ -236,10 +236,6 @@ tests/                  Rust, Python and C tests
   and request ids come from `kanto.server`, a development server (no authentication, ratings,
   spectators or timer enforcement). `BattleStream` rejects sets whose abilities, items or
   natures Showdown's simulator would apply (kanto models none of them) and random teams.
-- kanto's `[Gen 1] OU` validator is never stricter than Showdown's, but it does not implement
-  Showdown's obtainability checks: minimum encounter and evolution levels, level-up moves above
-  the set's level, event-only moves and move combinations. On 4,000 random-level teams (2026-10-18)
-  it accepted 123 that Showdown rejects.
 - No PyPI release yet: installing builds the Rust extension from source (wheel workflow in
   `.github/workflows/wheels.yml`, untested beyond Linux aarch64).
 

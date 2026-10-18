@@ -383,13 +383,237 @@ pub fn format_problems(spec: &TeamSpec, format: &str) -> Result<Vec<String>, Str
             }
             nicks.push(n);
         }
-        if let Some(e) = &p.exp {
-            if [e.hp, e.atk, e.def, e.spe, e.spc].iter().all(|v| *v == Some(0)) {
-                out.push(format!("{display} has exactly 0 EVs."));
+        // EV sanity checks (`validateStats`), on the EVs Showdown sees: the packed EVs kanto writes
+        // (stat exp -> EV, 65535 when not given), Special counted for both SpA and SpD.
+        let e = p.exp.clone().unwrap_or_default();
+        let ev = |x: Option<u16>| ev_of(x.unwrap_or(65535)) as u32;
+        let total = ev(e.hp) + ev(e.atk) + ev(e.def) + 2 * ev(e.spc) + ev(e.spe);
+        let level = p.level.unwrap_or(100);
+        let named = match &p.nickname {
+            Some(n) if !n.is_empty() => format!("{n} ({display})"),
+            _ => display.to_string(),
+        };
+        if level > 1 && total == 0 {
+            out.push(format!("{display} has exactly 0 EVs."));
+        } else if total == 508 || total == 510 {
+            out.push(format!("{named} has exactly {total} EVs, but this format does not restrict you to 510 EVs."));
+        }
+        if level == 50 && total % 4 == 0 {
+            out.push(format!("{named} is level 50, but this format allows level 100 Pokémon."));
+        }
+        out.extend(obtainability(p));
+    }
+    Ok(out)
+}
+
+/// The obtainability checks of Showdown's `[Gen 1] OU` validator (`TeamValidator#validateSet`,
+/// `validateMoves`, `checkCanLearn`, `validateSource`/`validateEvent`, ported for Gen 1 sources
+/// only): the "Obtainable Moves" combination bans, moves learned by level-up above the set's
+/// level, event-only moves (one event must give all of them; no Japan-only events; the event's
+/// minimum level), the lowest Gen 1 encounter level and the minimum level to be evolved. (Sets are
+/// taken as not shiny: kanto does not store shininess.)
+pub fn obtainability(p: &crate::team::PokemonSet) -> Vec<String> {
+    use crate::data::obtainable::{COMBO_BANS, EVENTS, OBTAIN};
+    let mut out = Vec::new();
+    let Some(num) = data::species_id(&p.species) else { return out };
+    let sp = &OBTAIN[num as usize];
+    let level = p.level.unwrap_or(100);
+    let species_name = sp.name;
+    // validateSet's `name`: "Nick (Species)" for a nickname.
+    let name = match &p.nickname {
+        Some(n) if !n.is_empty() && n != species_name => format!("{n} ({species_name})"),
+        _ => species_name.to_string(),
+    };
+    let by_id = |id: &str| OBTAIN.iter().find(|o| o.id == id);
+    let move_ids: Vec<String> = p.moves.iter().map(|m| data::to_id(m)).collect();
+    let move_name = |id: &str| data::move_id(id).map(|k| data::MOVE_NAMES[k as usize]).unwrap_or("");
+    // Complex bans ("pokemon:" = this species, "basepokemon:" = its base species: the same in Gen 1).
+    for (rule, source, parts) in COMBO_BANS.iter() {
+        let has = |part: &str| match part.split_once(':') {
+            Some(("pokemon" | "basepokemon", id)) => id == sp.id,
+            Some(("move", id)) => move_ids.iter().any(|m| m == id),
+            _ => false,
+        };
+        if parts.iter().all(|x| has(x)) {
+            if *source == "Obtainable Moves" {
+                out.push(format!("{name} has the combination of {rule}, which is impossible to obtain legitimately."));
+            } else {
+                out.push(format!("{name} has the combination of {rule}, which is banned by {source}."));
             }
         }
     }
-    Ok(out)
+    // The species and its pre-evolutions, as Showdown's getFullLearnset walks them.
+    let mut chain = vec![sp];
+    while let Some(prev) = by_id(chain.last().unwrap().prevo).filter(|_| !chain.last().unwrap().prevo.is_empty()) {
+        chain.push(prev);
+    }
+    // checkCanLearn for each move; `restricted` = the event sources every move so far allows
+    // (None = unrestricted, Showdown's `sourcesBefore`).
+    let mut restricted: Option<Vec<(&str, u8)>> = None;
+    let mut restrictive_moves: Vec<&str> = Vec::new();
+    let mut baby_only: Option<&str> = None;
+    let mut move_problem = None;
+    for mid in &move_ids {
+        let mname = move_name(mid);
+        if !restrictive_moves.contains(&mname) {
+            restrictive_moves.push(mname);
+        }
+        let mut reason: Option<u32> = None;
+        let mut events: Vec<(&str, u8)> = Vec::new();
+        let mut unrestricted = false;
+        let mut baby: Option<&str> = None;
+        for (k, s) in chain.iter().enumerate() {
+            if k > 0 && events.is_empty() && !unrestricted {
+                baby = Some(s.id);
+            }
+            let Some((_, srcs)) = s.moves.iter().find(|(m, _)| m == mid) else { continue };
+            for src in srcs.iter() {
+                let kind = src.as_bytes().get(1).copied().unwrap_or(b'?');
+                match kind {
+                    b'L' => {
+                        let n: u32 = src[2..].parse().unwrap_or(0);
+                        if level as u32 >= n {
+                            unrestricted = true;
+                        } else {
+                            reason = Some(n);
+                        }
+                    }
+                    b'M' | b'T' => unrestricted = true,
+                    b'S' => {
+                        let i: u8 = src[2..].parse().unwrap_or(0);
+                        events.push((s.id, i));
+                    }
+                    _ => {}
+                }
+            }
+            if unrestricted && baby.is_none() {
+                break;
+            }
+        }
+        if unrestricted {
+            if baby.is_some() {
+                baby_only = baby;
+            }
+            continue;
+        }
+        if events.is_empty() {
+            move_problem = Some(match reason {
+                Some(n) => format!("{name}'s move {mname} is learned at level {n}."),
+                None => format!("{name} can't learn {mname}."),
+            });
+            break;
+        }
+        let next = match &restricted {
+            None => events.clone(),
+            Some(r) => r.iter().copied().filter(|e| events.contains(e)).collect(),
+        };
+        if next.is_empty() {
+            move_problem = Some(format!("{name}'s moves {} are incompatible.", restrictive_moves.join(", ")));
+            break;
+        }
+        restricted = Some(next);
+        if baby.is_some() {
+            baby_only = baby;
+        }
+    }
+    if let Some(m) = move_problem {
+        out.push(m);
+        return out;
+    }
+    if let (Some(baby), Some(r)) = (baby_only, restricted.as_mut()) {
+        r.retain(|(s, _)| *s == baby);
+        if r.is_empty() {
+            let bname = by_id(baby).map_or("", |o| o.name);
+            out.push(format!("{name}'s event/egg moves are from an evolution, and are incompatible with its moves from {bname}."));
+            return out;
+        }
+    }
+    let event = |s: &str, i: u8| EVENTS.iter().find(|e| e.0 == s && e.1 == i);
+    // validateEvent with `fastReturn`: whether the set qualifies for the event.
+    let qualifies = |s: &str, i: u8| event(s, i).is_some_and(|e| !e.3 && level >= e.2);
+    let event_problems = |s: &str, i: u8, because: &str| -> Vec<String> {
+        let mut v = Vec::new();
+        if let Some(e) = event(s, i) {
+            let n = match &p.nickname {
+                Some(n) if !n.is_empty() && n != species_name => format!("{n} ({species_name})"),
+                _ => species_name.to_string(),
+            };
+            if e.3 {
+                v.push(format!("{n} has moves from Japan-only events, but this format simulates International Yellow/Crystal which can't trade with Japanese games."));
+            }
+            if level < e.2 {
+                v.push(format!("{n} must be at least level {}{because} from an event.", e.2));
+            }
+        }
+        v
+    };
+    // Lowest Gen 1 encounter level.
+    let mut from_rby = false;
+    if sp.encounter > 0 {
+        if level < sp.encounter {
+            out.push(format!("{name} is not obtainable at levels below {} in Gen 1.", sp.encounter));
+        }
+        from_rby = true;
+    }
+    // Minimum level to be evolved.
+    let mut under: Option<(&str, u8)> = None;
+    if !from_rby {
+        for e in &chain {
+            if e.prevo.is_empty() {
+                break;
+            }
+            if level < e.evo_level {
+                under = Some((e.id, e.evo_level));
+                break;
+            }
+        }
+    }
+    let sources: Option<Vec<(&str, u8)>> = match (&restricted, under) {
+        (Some(r), _) => Some(r.clone()),
+        (None, Some((uid, _))) => {
+            let mut v = Vec::new();
+            for e in &chain {
+                if e.prevo.is_empty() {
+                    break;
+                }
+                for ev in EVENTS.iter().filter(|ev| ev.0 == e.id) {
+                    if ev.2 > 0 && level >= ev.2 {
+                        v.push((ev.0, ev.1));
+                    }
+                }
+                if e.id == uid {
+                    break;
+                }
+            }
+            Some(v)
+        }
+        (None, None) => None,
+    };
+    if let Some(sources) = sources {
+        let legal: Vec<&(&str, u8)> = sources
+            .iter()
+            .filter(|(s, _)| match under {
+                // Underleveled: only events of this species or of the underleveled one count.
+                Some((uid, _)) => *s == sp.id || *s == uid,
+                None => true,
+            })
+            .filter(|(s, i)| qualifies(s, *i))
+            .collect();
+        if legal.is_empty() {
+            if let Some((_, lv)) = under {
+                out.push(format!("{name} must be at least level {lv} to be evolved."));
+                if let Some((s, i)) = sources.first() {
+                    out.extend(event_problems(s, *i, " to be underleveled"));
+                }
+            } else if let Some((s, i)) = sources.first() {
+                if sources.len() > 1 {
+                    out.push(format!("{name} has an event-exclusive move that it doesn't qualify for (only one of several ways to get the move will be listed):"));
+                }
+                out.extend(event_problems(s, *i, " because it has a move only available"));
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -446,6 +670,26 @@ mod tests {
     fn gen1ou_bans() {
         let t = parse_showdown_teams("Mewtwo\n- Psychic\n- Fly\n\nChansey\n- Minimize\n").unwrap();
         let p = format_problems(&t[0], "gen1ou").unwrap();
-        assert_eq!(p.len(), 3, "{p:?}");
+        // Uber, Fly banned, Mewtwo can't learn Fly (the obtainability check), Minimize banned.
+        assert_eq!(p.len(), 4, "{p:?}");
+    }
+
+    /// Showdown's obtainability checks (messages as `TeamValidator('gen1ou')` writes them).
+    #[test]
+    fn gen1ou_obtainability() {
+        let check = |text: &str| format_problems(&parse_showdown_teams(text).unwrap()[0], "gen1ou").unwrap();
+        assert_eq!(check("Moltres\nLevel: 40\n- Fire Spin\n"), ["Moltres is not obtainable at levels below 50 in Gen 1."]);
+        assert_eq!(check("Charizard\nLevel: 30\n- Ember\n"), ["Charizard must be at least level 36 to be evolved."]);
+        assert_eq!(check("Doduo\nLevel: 20\n- Drill Peck\n"), ["Doduo's move Drill Peck is learned at level 30."]);
+        assert_eq!(check("Kakuna\n- String Shot\n- Harden\n"), ["Kakuna has the combination of Kakuna + String Shot + Harden, which is impossible to obtain legitimately."]);
+        assert_eq!(
+            check("Magikarp\n- Dragon Rage\n"),
+            ["Magikarp has moves from Japan-only events, but this format simulates International Yellow/Crystal which can't trade with Japanese games."]
+        );
+        assert!(check("Psyduck\nLevel: 15\n- Amnesia\n- Scratch\n").is_empty());
+        assert_eq!(
+            check("Psyduck\nLevel: 14\n- Amnesia\n"),
+            ["Psyduck is not obtainable at levels below 15 in Gen 1.", "Psyduck must be at least level 15 because it has a move only available from an event."]
+        );
     }
 }
