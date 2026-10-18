@@ -271,6 +271,7 @@ pub const VIRT_ALL: u8 = 0xF;
 
 /// Volatile state of the active Pokémon (reset by `clearVolatile`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(align(16))]
 pub struct Active {
     pub species: u8,
     pub types: [u8; 2],
