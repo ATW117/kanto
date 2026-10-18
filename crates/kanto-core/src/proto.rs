@@ -31,6 +31,21 @@ pub struct Log {
     pub nicknames: [Vec<String>; 2],
     /// Value written into `|t:|` lines (Showdown writes `Math.floor(Date.now() / 1000)`).
     pub timestamp: u64,
+    /// Optional per-Pokémon set details beyond the species (empty = the defaults): see
+    /// [`SetExtra`].
+    pub extras: [Vec<SetExtra>; 2],
+}
+
+/// Set fields that show up in the protocol but not in the mechanics the native simulator
+/// models: the `details` suffix (`, M`, `, shiny`) and the request's `baseAbility` / `item` /
+/// `pokeball` ids.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SetExtra {
+    pub details_suffix: String,
+    pub ability: String,
+    pub item: String,
+    /// Empty = `pokeball`.
+    pub pokeball: String,
 }
 
 impl Log {
@@ -105,6 +120,11 @@ impl Log {
     }
 
     /// `Pokemon#name` of `p`'s original team slot `slot`: its nickname, else the species name.
+    /// The [`SetExtra`] of team slot `slot` of `p`, if any.
+    pub fn extra(&self, p: Player, slot: usize) -> Option<&SetExtra> {
+        self.extras[p & 1].get(slot)
+    }
+
     pub fn name<'a>(&'a self, p: Player, slot: usize, species_name: &'a str) -> &'a str {
         match self.nicknames[p & 1].get(slot) {
             Some(n) if !n.is_empty() => n,

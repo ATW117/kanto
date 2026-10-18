@@ -22,6 +22,7 @@ use kanto_gen1::{MonSpec, Prng, Rules};
 
 mod determinize;
 mod proto_game;
+pub mod sd;
 pub use determinize::determinize;
 pub use proto_game::ProtoGame;
 

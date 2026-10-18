@@ -89,6 +89,87 @@ Gen 5 and sodium seeds; 269,496 decisions) give identical logs in pokemon-showdo
 Showdown master 7244fe8 (2026-10-16). `tests/python/test_showdown_interop.py` runs 120 of them
 when `PS_DIR` is set.
 
+## A drop-in `BattleStream` / `simulate-battle`
+
+`kanto.BattleStream` (Rust: `kanto_backend::sd::{BattleStream, BattleTextStream}`) speaks
+Showdown's battle-stream protocol, the one `sim/battle-stream` and `pokemon-showdown
+simulate-battle` use, for `[Gen 1] OU`: write `>start`, `>player` and `>p1`/`>p2` lines, read back
+exactly the messages Showdown would send (`update`, `sideupdate` with `|request|` and `|error|`,
+`end`, `requesteddata`). `kanto-simulate` is the same as a command-line program.
+
+```bash
+cargo build --release -p kanto-backend --bin kanto-simulate
+target/release/kanto-simulate < battle.txt        # same stdout as: pokemon-showdown simulate-battle < battle.txt
+```
+
+```python
+s = kanto.BattleStream()
+out = s.write('>start {"formatid":"gen1ou","seed":"1,2,3,4"}\n'
+              '>player p1 {"name":"Alice","team":"Tauros|||NoAbility|bodyslam,hyperbeam|||||||"}\n'
+              '>player p2 {"name":"Bob","team":"Snorlax|||NoAbility|bodyslam,rest|||||||"}\n')
+out = s.write(">p1 move Body Slam\n>p2 move 9\n")   # p2 gets "|error|[Invalid choice] Can't move: Your Snorlax doesn't have a move 9"
+msgs = s.write(">p2 default\n", messages=True)       # ["update\n|\n|t:|...", "sideupdate\np1\n|request|{...}", ...]
+kanto.simulate_battle(text)                           # a whole input at once
+```
+
+What is ported (from pokemon-showdown 0.11.11, `sim/battle-stream.ts`, `sim/side.ts`,
+`sim/battle.ts`, `sim/teams.ts`):
+
+- Commands: `>start` (seed as a string or an array, `rated`, players inline), `>player` (packed or
+  JSON teams, name/avatar/rating, renames), `>p1`/`>p2` choices and `undo`, `>forcewin`,
+  `>forcetie`, `>forcelose`, `>tiebreak`, `>reseed`, `>chat`, `>chat-inputlogonly`, `>requestlog`,
+  `>requestexport`, `>requestteam`, `>version`; unknown commands throw as in Showdown.
+- Choices: `Side#choose` with its exact error messages: move by index or name, target locations,
+  `mega`/`zmove`/`max`/`terastallize` suffixes (rejected the way Showdown rejects them in Gen 1),
+  `switch` by slot or name, `pass`/`skip`, `default`/`auto` and an empty `move`, `shift`, `team`,
+  comma lists, `testfight`; `[Invalid choice]` and `[Unavailable choice]` errors, request updates
+  (`"update":true`), the Gen 1 Struggle notice, and the Cancel Mod `undo` rules.
+- Output batching: one `update` (and the pending requests) per write, flushed early past 500 log
+  lines, partial input lines held for the next write and dropped at the end, the `end` summary
+  (winner, seed, teams as Showdown's `Pokemon` constructor left them, score, input log), and
+  nothing after the stream ends.
+- Showdown's own crash: for the "moveSlot is null" state (docs/SIM_STATUS.md) the stream fails
+  the same way, on the same input.
+
+Checked with `parity stream-fuzz` (2026-10-18): random input streams through Showdown's own
+`BattleTextStream` and kanto's, compared byte for byte with only the `|t:|` timestamps
+normalised. Each input is written three ways in both — one write per line (an interactive
+client), the whole input in one write (`simulate-battle < file`) and random chunk boundaries.
+Inputs mix legal choices (by index, by name, `default`, with targets) with invalid ones (bad
+indices and names, targets, events, `pass`/`shift`/`team`, garbage), `undo` and `testfight`, chat
+and request commands, `>reseed`, and endings by faint, `>forcewin`, `>forcetie`, `>forcelose` and
+`>tiebreak`; teams come packed or as JSON with random nicknames, levels, EV/IV fields, genders,
+shininess and key order.
+
+| Run (seed) | inputs | input lines | runs | battles ended | differ |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 100 | 3,000 | 293,335 | 9,000 | 2,743 | 0 |
+| 4 | 1,000 | 98,051 | 3,000 | 911 | 0 |
+
+The runs covered 37,879 `|error|` lines (2,648 distinct messages), 353 request updates, 1,467
+Struggle notices, 6,144 forced-switch and 5,882 "Fight" requests, 2,469 wins, 274 ties and 144
+tiebreaks. Runs where Showdown throws (a choice before both players joined, the "moveSlot is
+null" crash) count as equal only if kanto throws too and the output before the throw is equal.
+`pokemon-showdown simulate-battle --skip-build < input` and `kanto-simulate < input` gave
+byte-identical stdout and the same exit status on 60 of 60 generated inputs; fed line by line
+through a pipe, they also agree when Node keeps up with the input (Node reads whatever has
+arrived since its last read as one chunk, so its batching depends on timing, as it does between
+two runs of Showdown). `parity/fixtures/stream/corpus.jsonl` (160 runs) replays without Node in
+`cargo test`; `tests/python/test_battle_stream.py` compares with Node when `PS_DIR` is set.
+
+Not supported (an error, never a silent difference):
+
+- Formats other than `gen1ou` and its `@@@!Sleep Clause Mod` / `!Freeze Clause Mod` variants.
+- Set fields Showdown's simulator would act on but kanto does not model: abilities other than No
+  Ability (an empty packed ability becomes the species' modern ability in Showdown, e.g.
+  Intimidate, and works in Gen 1 battles there), items, natures other than the neutral ones,
+  non-Gen 1 species or moves, unknown move names, levels above 100, more than 6 Pokémon or 4
+  moves. Showdown's server validator would reject most of these anyway.
+- Random teams (`>player` without a team), `>eval`, `>editbattle`, `>show-openteamsheets` before
+  the battle starts, the `--replay`/`--spectate`/`--debug` output modes, doubles/p3/p4.
+- Timers, chat rooms, ladders and request ids (`rqid`) are server features, not part of
+  `BattleStream`; `kanto.server` covers the parts poke-env needs.
+
 ## A local Showdown server: `kanto.server`
 
 `python -m kanto.server` speaks enough of the Showdown *server* protocol for unmodified poke-env
