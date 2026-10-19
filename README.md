@@ -72,7 +72,9 @@ fuzzed battle reached could still differ. To check the numbers yourself:
 ## Speed
 
 Like-for-like, on identical battles (the same seeds, teams and choices) on one aarch64 core
-(NVIDIA DGX Spark, Cortex-X925), both engines writing Showdown's full battle log and requests:
+(NVIDIA DGX Spark, Cortex-X925), both engines writing Showdown's full battle log and requests
+(measured 2026-10-17, before the second performance pass; the pkmn/engine comparison below is
+later, 2026-10-18):
 
 | Engine | turns/s | vs Showdown |
 | --- | ---: | ---: |
@@ -100,7 +102,7 @@ Requirements: Rust (stable), Python ≥ 3.10, [uv](https://github.com/astral-sh/
 pkmn/engine backend also needs Zig 0.16 and the submodule.
 
 ```bash
-git clone --recurse-submodules git@github.com:ATW117/kanto.git && cd kanto
+git clone --recurse-submodules https://github.com/ATW117/kanto.git && cd kanto
 uv venv .venv && source .venv/bin/activate
 uv pip install maturin numpy pytest gymnasium
 maturin develop --release                    # builds the Rust extension into the venv
@@ -237,7 +239,9 @@ tests/                  Rust, Python and C tests
   exactness. Live servers seed battles with fresh sodium seeds, so a ladder battle cannot be
   replayed seed-for-seed unless its input log (with the seed) is exported.
 - Showdown 0.11.11 itself crashes ("moveSlot is null") in a rare sleep/freeze + Transform state.
-  kanto does not crash there; it does what pkmn/engine does. Those battles have no ground truth.
+  The engine and `VecEnv` do not crash there; they do what pkmn/engine does. `BattleStream`, being
+  a drop-in for Showdown's, deliberately fails the same way Showdown does. Those battles have no
+  ground truth.
 - `ProtocolBattle` and `BattleStream` emit battle messages only; room messages (`|init|`, `|j|`)
   and request ids come from `kanto.server`, a development server (no authentication, ratings,
   spectators or timer enforcement). `BattleStream` rejects sets whose abilities, items or

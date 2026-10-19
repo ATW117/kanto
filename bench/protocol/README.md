@@ -30,4 +30,5 @@ Node 22, 2,000 battles per pool:
 | kanto engine (no text) | 6.80 M turns/s (884x) | 7.04 M turns/s (916x) |
 
 The engine figure replays fixed choices; random self-play, which also enumerates legal choices,
-runs 4.6-5.0 M turns/s (`examples/bench.rs`).
+runs 4.6-5.0 M turns/s (`examples/bench.rs`; 2026-10-17, before the second performance pass,
+which brought it to 5.4 M: README, "Speed").
