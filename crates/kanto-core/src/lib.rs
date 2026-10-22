@@ -142,6 +142,15 @@ pub enum Event {
     Immune,
     Fail,
     Faint { player: Player, slot: u8 },
+    /// `|-damage|X|...|[from] confusion`: X hurt itself in its confusion.
+    ConfusionDamage { player: Player },
+    /// `|-end|X|<binding move>|[partiallytrapped]`: X is no longer partially trapped (Gen 1: it
+    /// made a Substitute).
+    TrapEnd { player: Player },
+    /// `|-mustrecharge|X`.
+    MustRecharge { player: Player },
+    /// `|-status|X|slp`: X fell asleep.
+    SleepStart { player: Player },
     DisableStart { player: Player, slot: u8, mv: u8 },
     MimicStart { player: Player, mv: u8 },
     Transform { player: Player },

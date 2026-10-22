@@ -20,6 +20,17 @@ pub struct SideTrack {
     pub toxic_elapsed: u8,
     /// Move copied by Mimic (0 = none) for the active Pokémon.
     pub mimic_move: u8,
+    /// Hits of this side's current partial-trapping sequence seen in the protocol (0 = none).
+    pub bind_hits: u8,
+    /// This side's active is partially trapping the foe, as far as the observer can tell: how
+    /// long Wrap/Bind/Fire Spin/Clamp lasts (2-5 hits) is hidden from both players, so this is
+    /// predicted from the hits so far (still binding after one or two), unless the observer's own
+    /// request shows it is bound (a lone "Fight").
+    pub binding: bool,
+    /// This side's active must recharge, as far as the observer can tell: set by
+    /// `|-mustrecharge|`; a hidden flinch (or a foe's binding move, or sleep) can cancel the
+    /// recharge silently. Exact for the observer's own side (its request shows "Recharge").
+    pub recharging: bool,
 }
 
 /// Public events of the most recent update for one side.

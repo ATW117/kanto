@@ -93,12 +93,40 @@ fn map_event(e: &Event) -> Option<PEvent> {
         Event::MimicStart { player, mv } => PEvent::MimicStart { player, mv },
         Event::Transform { player } => PEvent::Transform { player },
         Event::Turn { .. } => PEvent::Turn,
-        Event::Faint { .. } => return None,
+        Event::Faint { player, .. } => PEvent::Faint { player },
+        Event::ConfusionDamage { player } => PEvent::ConfusionDamage { player },
+        Event::TrapEnd { player } => PEvent::TrapEnd { player },
+        Event::MustRecharge { player } => PEvent::MustRecharge { player },
+        Event::SleepStart { player } => PEvent::SleepStart { player },
     })
 }
 
+/// What each player's request shows about its own active (`reveal::apply_requests`).
+fn request_flags(b: &Battle) -> [reveal::RequestFlags; 2] {
+    std::array::from_fn(|p| {
+        if !b.started || b.sides[p].request != kanto_core::Request::Move {
+            return Default::default();
+        }
+        let (moves, n, _) = b.request_moves(p);
+        let asleep_or_frozen = matches!(b.sides[p].mon().status, st::SLP | st::FRZ);
+        reveal::RequestFlags {
+            lone_fight: !asleep_or_frozen && n == 1 && moves[0].id == kanto_gen1::req::FIGHT,
+            recharge: Some(n == 1 && moves[0].id == kanto_gen1::req::RECHARGE),
+        }
+    })
+}
+
+/// Apply an update's events, then the requests that follow it, to both memories; advance the
+/// trackers (the order a Showdown client processes them in, `kanto_env::client`).
+fn reveal_update(b: &Battle, events: &[Event], turn_before: u16, mem: &mut [Memory; 2]) {
+    reveal::apply_events(&Reveal(b), events.iter().filter_map(map_event), mem);
+    reveal::apply_requests(request_flags(b), mem);
+    if b.started {
+        reveal::update_trackers(&track_flags(b), b.turn > turn_before && turn_before > 0, mem);
+    }
+}
+
 fn track_flags(b: &Battle) -> [TrackFlags; 2] {
-    let binding = [b.sides[0].active.has(v::PARTIALTRAPPINGLOCK), b.sides[1].active.has(v::PARTIALTRAPPINGLOCK)];
     std::array::from_fn(|p| {
         let sd = &b.sides[p];
         let a = &sd.active;
@@ -106,7 +134,6 @@ fn track_flags(b: &Battle) -> [TrackFlags; 2] {
             confused: a.has(v::CONFUSION),
             disabled: a.has(v::DISABLE),
             toxic: a.has(v::RESIDUALDMG) && sd.mon().status == st::TOX,
-            trapped: binding[0] || binding[1],
             asleep: std::array::from_fn(|i| sd.mons[i].status == st::SLP),
         }
     })
@@ -263,10 +290,7 @@ macro_rules! native_backend {
                 let mut buf = EventBuf::default();
                 let turn_before = b.turn;
                 b.apply_choices_unchecked(c1, c2, &mut buf);
-                reveal::apply_events(&Reveal(b), buf.as_slice().iter().filter_map(map_event), mem);
-                if b.started {
-                    reveal::update_trackers(&track_flags(b), b.turn > turn_before && turn_before > 0, mem);
-                }
+                reveal_update(b, buf.as_slice(), turn_before, mem);
                 match b.outcome() {
                     kanto_core::Outcome::Ongoing => Outcome::Ongoing,
                     kanto_core::Outcome::P1Win => Outcome::P1Win,

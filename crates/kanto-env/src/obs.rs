@@ -405,11 +405,12 @@ pub fn encode(v: &View, player: usize, mem: &Memory, privileged: bool, out: &mut
     // Active blocks.
     encode_active(me, &mem.track[player], true, &mut out[OFF_OWN_ACTIVE..OFF_OWN_ACTIVE + ACTIVE_DIM]);
     encode_active(foe, &mem.track[1 - player], false, &mut out[OFF_OPP_ACTIVE..OFF_OPP_ACTIVE + ACTIVE_DIM]);
-    // `partially_trapped` = the other side's active is using a binding move.
-    if foe.active.party_idx != UNREVEALED && foe.active.volatiles & vol::BINDING != 0 {
+    // `partially_trapped` = the other side's active is binding, as the observer sees it
+    // (`SideTrack::binding`: the hidden duration of partial trapping is predicted, not read).
+    if foe.active.party_idx != UNREVEALED && mem.track[1 - player].binding {
         out[OFF_OWN_ACTIVE + active::VOLATILES + 8] = 1.0;
     }
-    if me.active.party_idx != UNREVEALED && me.active.volatiles & vol::BINDING != 0 {
+    if me.active.party_idx != UNREVEALED && mem.track[player].binding {
         out[OFF_OPP_ACTIVE + active::VOLATILES + 8] = 1.0;
     }
 
@@ -453,9 +454,9 @@ fn encode_active(side: &SideView, t: &crate::memory::SideTrack, own_side: bool, 
     f[4] = has(vol::LIGHT_SCREEN);
     f[5] = has(vol::MIST);
     f[6] = has(vol::FOCUS_ENERGY);
-    f[7] = has(vol::RECHARGING);
+    f[7] = t.recharging as u8 as f32; // the observer's estimate (exact for its own side)
     // f[8] partially_trapped is set by the caller from the other side.
-    f[9] = has(vol::BINDING);
+    f[9] = t.binding as u8 as f32; // the observer's estimate, not the hidden state
     f[10] = has(vol::BIDE);
     f[11] = (v & (vol::THRASHING | vol::RAGE | vol::CHARGING | vol::INVULNERABLE) != 0) as u8 as f32;
     f[12] = has(vol::RAGE);

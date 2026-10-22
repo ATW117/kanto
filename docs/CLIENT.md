@@ -57,19 +57,30 @@ state without a message. Among them:
 (request first, then the update, as a server sends them) into a `ClientBattle`, and compares the
 client's observation, mask and choice strings with the env's (`ProtoGame`) at every step.
 
-| Teams | Battles | Player-steps | Exact | Differences |
+| Teams | Battles | Player-steps | Exact steps | Differences |
 | --- | ---: | ---: | ---: | --- |
-| kanto's generated pool | 300 | 41,340 | 99.68% | partial trapping only |
-| Metamon Gen 1 OU eval split | 3,000 | 367,712 | 99.78% | partial trapping only |
+| Metamon Gen 1 OU eval split | 3,000 | 402,358 | 100% | none |
+| Metamon Gen 1 OU train split | 3,000 | 394,624 | 99.994% | own Mimic PP (25 steps) |
+| kanto's generated pool | 3,000 | 392,070 | 99.9995% | own Mimic slot (2 steps) |
 
-Every field matches except three that depend on **partial trapping** (Wrap, Bind, Fire Spin,
-Clamp). Its length (2-5 hits with probabilities 3/8, 3/8, 1/8, 1/8) is drawn in secret and the
-lock ends without a message; in Gen 1 even the binder's request does not show it. The env's
-observation, which is computed from the simulator's state, shows whether the lock continues; no
-player can know that. The client predicts it from the number of hits so far (binding after one or
-two hits, where continuing is more likely), so the `partially_trapped`/`trapping` flags and the
-trap-elapsed counter can differ from the env's in those states. The test requires every other
-field to match exactly and the partial-trapping differences to stay below 1% of steps.
+Two pieces of Gen 1 state are hidden from both players, and the env and the client estimate
+both from the protocol in the same way (`memory::SideTrack`), so the observation never reveals
+them:
+
+- **Partial trapping** (Wrap, Bind, Fire Spin, Clamp) lasts 2-5 hits (3/8, 3/8, 1/8, 1/8), drawn in
+  secret, and ends without a message; not even the binder's request shows it. The
+  `partially_trapped`/`trapping` flags and the trap-elapsed counter predict it from the hits so
+  far (binding after one or two, where continuing is more likely); a player whose request is a
+  lone "Fight" knows it is bound.
+- **Recharge** after Hyper Beam can be cancelled by a hidden flinch. The flag follows
+  `|-mustrecharge|` and the events that end a recharge; for the own side the request shows it.
+
+Moves are counted as revealed by a public rule too: a move used while it is the user's Mimic copy
+is not a reveal, even if the user also knows it.
+
+The remaining differences are in the observer's own PP and move slots after its own Mimic copies
+a move it also knows: the PP comes off the slot the player chose, which the client is not told.
+Neither involves information the player lacks. The test requires every field to match exactly.
 
 Other approximations (not reached by the test corpus):
 

@@ -378,7 +378,16 @@ fn write_memory(m: &Memory, out: &mut Vec<u8>) {
     out.push(m.opp_transformed as u8);
     m.sleep_obs.iter().for_each(|x| out.extend_from_slice(x));
     for t in &m.track {
-        out.extend_from_slice(&[t.confusion_elapsed, t.disable_elapsed, t.trap_elapsed, t.toxic_elapsed, t.mimic_move]);
+        out.extend_from_slice(&[
+            t.confusion_elapsed,
+            t.disable_elapsed,
+            t.trap_elapsed,
+            t.toxic_elapsed,
+            t.mimic_move,
+            t.bind_hits,
+            t.binding as u8,
+            t.recharging as u8,
+        ]);
     }
     for e in &m.last {
         let flags = [
@@ -415,9 +424,17 @@ fn read_memory(r: &mut Reader) -> Option<Memory> {
         m.sleep_obs[p] = r.arr()?;
     }
     for p in 0..2 {
-        let [a, b, c, d, e] = r.arr::<5>()?;
-        m.track[p] =
-            SideTrack { confusion_elapsed: a, disable_elapsed: b, trap_elapsed: c, toxic_elapsed: d, mimic_move: e };
+        let [a, b, c, d, e, h, g, rc] = r.arr::<8>()?;
+        m.track[p] = SideTrack {
+            confusion_elapsed: a,
+            disable_elapsed: b,
+            trap_elapsed: c,
+            toxic_elapsed: d,
+            mimic_move: e,
+            bind_hits: h,
+            binding: g != 0,
+            recharging: rc != 0,
+        };
     }
     for p in 0..2 {
         let f = u16::from_le_bytes(r.arr()?);

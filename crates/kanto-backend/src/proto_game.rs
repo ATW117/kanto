@@ -6,12 +6,11 @@
 //! game a `VecEnv(backend="native"|"native-nc")` env plays for the same battle and choices, and
 //! its observations equal the env's (`tests/native.rs::proto_game_matches_env`).
 
-use crate::{map_event, track_flags, Reveal};
+use crate::reveal_update;
 use kanto_env::backend::{Action, Backend, MAX_CHOICES, NUM_ACTIONS};
 use kanto_env::env::opp_action;
 use kanto_env::memory::Memory;
 use kanto_env::obs::OBS_DIM;
-use kanto_env::reveal;
 use kanto_core::{Choice, Outcome};
 use kanto_gen1::state::Battle;
 use kanto_gen1::{ProtocolBattle, StepOutput};
@@ -91,10 +90,7 @@ impl ProtoGame {
         let out = if self.pb.battle.started { self.pb.step(c1, c2)? } else { self.pb.start() };
         let b = &self.pb.battle;
         let events = std::mem::take(&mut self.pb.last_events);
-        reveal::apply_events(&Reveal(b), events.iter().filter_map(map_event), &mut self.mem);
-        if b.started {
-            reveal::update_trackers(&track_flags(b), b.turn > turn_before && turn_before > 0, &mut self.mem);
-        }
+        reveal_update(b, &events, turn_before, &mut self.mem);
         self.refresh();
         Ok(out)
     }

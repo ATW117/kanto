@@ -176,19 +176,36 @@ impl crate::reveal::RevealSource for Gen1Battle {
     }
 }
 
+/// What each player's own request shows (`reveal::apply_requests`): partially trapped by the foe
+/// with the forced "Fight" as its only choice (awake, not frozen), and whether it must recharge.
+fn request_flags(b: &Gen1Battle) -> [crate::reveal::RequestFlags; 2] {
+    std::array::from_fn(|p| {
+        let a = b.active_idx(p);
+        if !b.started() || a == crate::memory::UNREVEALED {
+            return Default::default();
+        }
+        let s = b.status_byte(p, a as usize);
+        let mut raw = [0u8; 16];
+        let single = <Pkmn1 as crate::backend::Backend>::choices(b, p, &mut raw) == 1;
+        let bound = b.volatiles(1 - p) >> V::BINDING & 1 != 0;
+        crate::reveal::RequestFlags {
+            lone_fight: bound && s & 0b111 == 0 && s & (1 << 5) == 0 && single,
+            recharge: Some(b.volatiles(p) >> V::RECHARGING & 1 != 0),
+        }
+    })
+}
+
 /// Post-update bookkeeping from public state (see `reveal::update_trackers`).
 fn update_trackers(b: &Gen1Battle, turn_advanced: bool, mem: &mut [Memory; 2]) {
     if !b.started() {
         return;
     }
-    let binding = [b.volatiles(0) >> V::BINDING & 1 != 0, b.volatiles(1) >> V::BINDING & 1 != 0];
     let flags: [crate::reveal::TrackFlags; 2] = std::array::from_fn(|player| {
         let v = b.volatiles(player);
         crate::reveal::TrackFlags {
             confused: (v >> V::CONFUSION) & 1 != 0,
             disabled: (v >> V::DISABLE_MOVE) & 0b111 != 0,
             toxic: (v >> V::TOXIC) & 1 != 0,
-            trapped: binding[0] || binding[1],
             asleep: std::array::from_fn(|i| b.status_byte(player, i) & 0b111 != 0),
         }
     });
@@ -261,6 +278,7 @@ impl Backend for Pkmn1 {
         assert!(!unsafe { pkmn_sys::pkmn_error(result) }, "libpkmn log buffer overflow");
         b.result = result;
         apply_log(b, &buf, mem);
+        crate::reveal::apply_requests(request_flags(b), mem);
         update_trackers(b, Self::turn(b) > turn_before && turn_before > 0, mem);
         match bits::result_kind(result) {
             pkmn_sys::PKMN_RESULT_NONE => Outcome::Ongoing,

@@ -474,7 +474,8 @@ impl Compact {
 /// memory consumes (kanto_env::reveal), in order:
 /// `p1 move bodyslam [from]`, `p2 switch 3` (original team slot), `p1 cant disable thunderbolt`,
 /// `p1 miss`, `crit`, `supereffective`, `resisted`, `immune`, `fail`, `p2 disable psychic`,
-/// `p1 mimic surf`, `p1 transform`, `p2 faint`, `turn`.
+/// `p1 mimic surf`, `p1 transform`, `p2 faint`, `p1 confusiondamage`, `p2 trapend`,
+/// `p1 mustrecharge`, `p2 slp`, `turn`.
 fn log_events(log: &[String], slots: &dyn Fn(usize, &str) -> Option<u8>) -> Vec<String> {
     let mut out = Vec::new();
     let mut skip = false;
@@ -528,6 +529,10 @@ fn log_events(log: &[String], slots: &dyn Fn(usize, &str) -> Option<u8>) -> Vec<
             }
             "-transform" => out.push(format!("{who} transform")),
             "faint" => out.push(format!("{who} faint")),
+            "-damage" if parts[3..].contains(&"[from] confusion") => out.push(format!("{who} confusiondamage")),
+            "-end" if parts[3..].contains(&"[partiallytrapped]") => out.push(format!("{who} trapend")),
+            "-mustrecharge" => out.push(format!("{who} mustrecharge")),
+            "-status" if parts.get(3) == Some(&"slp") => out.push(format!("{who} slp")),
             _ => {}
         }
     }
@@ -570,6 +575,10 @@ fn sim_events(ev: &[kanto_core::Event]) -> Vec<String> {
             Event::MimicStart { player, mv } => format!("p{} mimic {}", player + 1, move_id_str(mv)),
             Event::Transform { player } => format!("p{} transform", player + 1),
             Event::Faint { player, .. } => format!("p{} faint", player + 1),
+            Event::ConfusionDamage { player } => format!("p{} confusiondamage", player + 1),
+            Event::TrapEnd { player } => format!("p{} trapend", player + 1),
+            Event::MustRecharge { player } => format!("p{} mustrecharge", player + 1),
+            Event::SleepStart { player } => format!("p{} slp", player + 1),
             Event::Turn { .. } => "turn".into(),
         });
     }

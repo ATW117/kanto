@@ -23,6 +23,7 @@ use crate::obs::{self, status, vol, View, OBS_DIM};
 use crate::protocol::cant;
 
 const STRUGGLE: u8 = 165;
+const MIMIC: u8 = 102;
 
 /// Gen 1 boost multipliers (`modifyStat` with Showdown's table).
 fn boosted(stored: u16, stage: i8) -> u16 {
@@ -289,6 +290,7 @@ impl ClientBattle {
                 self.update_trackers(self.turn > turn_before && turn_before > 0);
             }
             // Public trackers are the same in both players' memories.
+            self.sync_estimates();
             self.opp_mem.track = self.mem.track;
             self.opp_mem.sleep_obs = self.mem.sleep_obs;
             self.opp_mem.last = self.mem.last;
@@ -323,6 +325,20 @@ impl ClientBattle {
     pub fn flush(&mut self) {
         if let Some(req) = self.pending.take() {
             self.apply_request(req);
+            self.sync_estimates();
+            self.opp_mem.track = self.mem.track;
+        }
+    }
+
+    /// Copy the partial-trapping and recharge estimates of the view into the memory's trackers
+    /// (the observation encoder and the env read them there, `memory::SideTrack`).
+    fn sync_estimates(&mut self) {
+        for p in 0..2 {
+            let v = self.view.sides[p].active.volatiles;
+            let t = &mut self.mem.track[p];
+            t.bind_hits = self.bind_hits[p];
+            t.binding = v & vol::BINDING != 0;
+            t.recharging = v & vol::RECHARGING != 0;
         }
     }
 
@@ -407,6 +423,11 @@ impl ClientBattle {
                 self.view.sides[1 - me].active.volatiles |= vol::BINDING;
             }
         }
+        // A move request shows whether the own active must recharge (a hidden flinch cancels it).
+        if let Some(ms) = req["active"].as_array().and_then(|a| a.first()).and_then(|a| a["moves"].as_array()) {
+            let recharge = ms.len() == 1 && ms[0]["id"].as_str() == Some("recharge");
+            set_bit(&mut self.view.sides[me].active.volatiles, vol::RECHARGING, recharge);
+        }
         // Active moves and PP (skip pseudo/locked entries without PP).
         if let Some(act) = req["active"].as_array().and_then(|a| a.first()) {
             if let Some(ms) = act["moves"].as_array() {
@@ -445,7 +466,8 @@ impl ClientBattle {
         }
         let m = &mut self.view.sides[me].mons[a.party_idx as usize];
         for k in 0..4 {
-            if a.moves[k] != 0 && a.moves[k] == m.moves[k] {
+            // Gen 1: the move Mimic copied uses the Mimic slot's PP.
+            if a.moves[k] != 0 && (a.moves[k] == m.moves[k] || m.moves[k] == MIMIC) {
                 m.pp[k] = a.pp[k];
             }
         }
@@ -701,15 +723,13 @@ impl ClientBattle {
                     self.last_move = Some((p, mv, false));
                     let still = parts.contains(&"[still]");
                     // A selection (no `[from]`, a charge turn included) reveals the observer's move.
-                    if p == me && !from && !self.opp_mem.opp_transformed && self.own_stored(i).contains(&mv) {
+                    // Moves the user does not own (Struggle, a Mimic copy) are not reveals; a Mimic
+                    // copy of a move the user also knows is indistinguishable, and not counted.
+                    let copied = self.mem.track[p].mimic_move == mv;
+                    if p == me && !from && !self.opp_mem.opp_transformed && mv != STRUGGLE && !copied {
                         self.opp_mem.see_move(i as u8, mv, true);
                     }
                     if p != me {
-                        // Moves the user does not own (Struggle, a Mimic copy) are not reveals. A
-                        // Mimic copy of a move the user also knows is indistinguishable: count it
-                        // when the species can learn the move.
-                        let species = self.view.sides[p].mons[i].species;
-                        let copied = self.mem.track[p].mimic_move == mv && !data::can_learn(species, mv);
                         if !from && !self.mem.opp_transformed && mv != STRUGGLE && !copied {
                             self.mem.see_move(i as u8, mv, true);
                         }
@@ -761,10 +781,11 @@ impl ClientBattle {
                         let s = &mut self.mem.sleep_obs[p][i];
                         *s = s.saturating_add(1);
                     }
-                    if reason == cant::DISABLE && p != me && self.mem.track[p].mimic_move != mv {
+                    let copied = self.mem.track[p].mimic_move == mv;
+                    if reason == cant::DISABLE && p != me && !self.mem.opp_transformed && !copied {
                         self.mem.see_move(i as u8, mv, false);
                     }
-                    if reason == cant::DISABLE && p == me && self.own_stored(i).contains(&mv) {
+                    if reason == cant::DISABLE && p == me && !self.opp_mem.opp_transformed && !copied {
                         self.opp_mem.see_move(i as u8, mv, false);
                     }
                     if reason == cant::RECHARGE {
@@ -872,7 +893,6 @@ impl ClientBattle {
                     let Some((p, name)) = parse_ident(parts[2]) else { continue };
                     let Some(i) = self.slot(p, name, None) else { continue };
                     let own_idx = self.view.sides[me].active.party_idx;
-                    let own_stored = if own_idx != UNREVEALED { self.own_stored(own_idx as usize) } else { [0; 4] };
                     let a = &mut self.view.sides[p].active;
                     match parts[3] {
                         "confusion" => {
@@ -896,10 +916,11 @@ impl ClientBattle {
                             } else {
                                 a.disabled_slot = 1;
                             }
-                            if p != me && self.mem.track[p].mimic_move != mv {
+                            let copied = self.mem.track[p].mimic_move == mv;
+                            if p != me && !self.mem.opp_transformed && !copied {
                                 self.mem.see_move(i as u8, mv, false);
                             }
-                            if p == me && own_stored.contains(&mv) {
+                            if p == me && !self.opp_mem.opp_transformed && !copied {
                                 self.opp_mem.see_move(i as u8, mv, false);
                             }
                         }
@@ -909,10 +930,10 @@ impl ClientBattle {
                             if p == me {
                                 let foe = 1 - me;
                                 let fi = self.view.sides[foe].active.party_idx;
-                                if fi != UNREVEALED && !self.mem.opp_transformed {
+                                if fi != UNREVEALED && !self.mem.opp_transformed && self.mem.track[foe].mimic_move != mv {
                                     self.mem.see_move(fi, mv, false);
                                 }
-                            } else if own_idx != UNREVEALED && own_stored.contains(&mv) {
+                            } else if own_idx != UNREVEALED && !self.opp_mem.opp_transformed && self.mem.track[me].mimic_move != mv {
                                 // The foe's Mimic copied one of the observer's moves.
                                 self.opp_mem.see_move(own_idx, mv, false);
                             }
@@ -1211,6 +1232,8 @@ impl ClientBattle {
         }
         let binding = matches!(self.bind_hits[p], 1 | 2);
         let a = &mut self.view.sides[p].active;
+        // A Pokémon that moves is not recharging.
+        a.volatiles &= !vol::RECHARGING;
         // A move executes: a charged two-turn move is released.
         if !still {
             a.volatiles &= !(vol::CHARGING | vol::INVULNERABLE);

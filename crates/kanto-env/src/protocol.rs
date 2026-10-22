@@ -41,6 +41,26 @@ pub enum Event {
     Transform {
         player: usize,
     },
+    /// `|faint|X`.
+    Faint {
+        player: usize,
+    },
+    /// `|-damage|X|...|[from] confusion`: X hurt itself in its confusion.
+    ConfusionDamage {
+        player: usize,
+    },
+    /// `|-end|X|<binding move>|[partiallytrapped]` (Showdown only; pkmn/engine does not send it).
+    TrapEnd {
+        player: usize,
+    },
+    /// `|-mustrecharge|X`.
+    MustRecharge {
+        player: usize,
+    },
+    /// `|-status|X|slp`.
+    SleepStart {
+        player: usize,
+    },
     /// Damage-outcome messages, attributed by the caller to the preceding `|move|` user.
     Crit,
     SuperEffective,
@@ -101,6 +121,7 @@ mod arg {
 
 // Reason codes that carry extra payload bytes.
 const MOVE_FROM: u8 = 1;
+const DAMAGE_CONFUSION: u8 = 3;
 const DAMAGE_RECOIL_OF: u8 = 5;
 const HEAL_DRAIN: u8 = 2;
 const STATUS_FROM: u8 = 2;
@@ -164,15 +185,23 @@ impl Iterator for Parser<'_> {
                     let mv = if disable { self.at(3) } else { 0 };
                     (2 + disable as usize, Some(Event::Cant { player, slot, reason, mv }))
                 }
-                arg::FAINT | arg::WIN | arg::MUST_RECHARGE => (1, None),
+                arg::FAINT => (1, Some(Event::Faint { player: ident(self.at(1)).0 })),
+                arg::MUST_RECHARGE => (1, Some(Event::MustRecharge { player: ident(self.at(1)).0 })),
+                arg::WIN => (1, None),
                 arg::MISS => (1, Some(Event::Miss)),
                 arg::CRIT => (1, Some(Event::Crit)),
                 arg::SUPER_EFFECTIVE => (1, Some(Event::SuperEffective)),
                 arg::RESISTED => (1, Some(Event::Resisted)),
                 arg::TURN => (2, Some(Event::Turn)),
-                arg::DAMAGE => (7 + (self.at(7) == DAMAGE_RECOIL_OF) as usize, None),
+                arg::DAMAGE => {
+                    let ev = (self.at(7) == DAMAGE_CONFUSION).then(|| Event::ConfusionDamage { player: ident(self.at(1)).0 });
+                    (7 + (self.at(7) == DAMAGE_RECOIL_OF) as usize, ev)
+                }
                 arg::HEAL => (7 + (self.at(7) == HEAL_DRAIN) as usize, None),
-                arg::STATUS => (3 + (self.at(3) == STATUS_FROM) as usize, None),
+                arg::STATUS => {
+                    let ev = (self.at(2) & 0b111 != 0).then(|| Event::SleepStart { player: ident(self.at(1)).0 });
+                    (3 + (self.at(3) == STATUS_FROM) as usize, ev)
+                }
                 arg::CURE_STATUS | arg::BOOST => (3, None),
                 arg::FAIL => (2, Some(Event::Fail)),
                 arg::IMMUNE => (2, Some(Event::Immune)),

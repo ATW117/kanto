@@ -221,6 +221,7 @@ impl Battle {
                 let maxhp = self.sides[p].mon().stats[0];
                 self.sides[p].active.sub_hp = (maxhp / 4) as i32 + 1;
                 if self.sides[p].active.has(v::PARTIALLYTRAPPED) {
+                    s.event(Event::TrapEnd { player: p });
                     // `-end|X|<trapping move>|[partiallytrapped]|[silent]`: the foe's move.
                     let mv = self.sides[1 - p].active.ptl_move;
                     plog!(s, |l| {
@@ -282,6 +283,9 @@ impl Battle {
         m.set_status_self(self_inflicted);
         m.slp_time = 0;
         m.slp_start = 0;
+        if status == st::SLP {
+            s.event(Event::SleepStart { player: p });
+        }
         plog!(s, |l| {
             let i = self.ident(l, p);
             if status == st::SLP && effect_move != 0 {
@@ -454,6 +458,9 @@ impl Battle {
             }
         }
         let dealt = self.mon_damage(p, d);
+        if kind == Direct::Confusion {
+            s.event(Event::ConfusionDamage { player: p });
+        }
         plog!(s, |l| self.add_health(l, "-damage", p, if kind == Direct::Confusion { "|[from] confusion" } else { "" }));
         dealt
     }
@@ -956,6 +963,7 @@ impl Battle {
                     if target_hp == 0 {
                         self.del_vol(p, id);
                     } else {
+                        s.event(Event::MustRecharge { player: p });
                         plog!(s, |l| {
                             let i = self.ident(l, p);
                             l.add(format!("|-mustrecharge|{i}"));

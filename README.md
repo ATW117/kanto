@@ -149,9 +149,8 @@ obs, mask = pb.observe(0)   # the same battle as env observations
 
 **Playing on a Showdown server.** `ClientBattle` goes the other way: it rebuilds a player's env
 observation and action mask from the messages a Showdown server sends that player, so an agent
-trained on `VecEnv` can play on a real server. It matches the env at every step except where the
-env shows Gen 1 partial trapping's hidden duration (99.78% of steps exact over 3,000 battles). See
-[docs/CLIENT.md](docs/CLIENT.md).
+trained on `VecEnv` can play on a real server. It matches the env at every step of 3,000 battles
+between eval-split teams (402,358 player-steps). See [docs/CLIENT.md](docs/CLIENT.md).
 
 **Showdown tools.** Teams can be given in Showdown's export or packed format
 (`kanto.convert_team`, `kanto.validate_team` for `[Gen 1] OU` bans), `ProtocolBattle` takes
@@ -162,9 +161,9 @@ battles/s of a local Showdown server with poke-env clients). See
 
 **Observations and actions.** 10 actions: 4 move slots and 6 switch targets (by original team
 slot), with a legality mask. The 752-float observation holds what a Showdown player can see
-(the opponent's unrevealed Pokémon and moves are unknown, HP is a percentage), with one known
-exception: the partial-trapping flags and counter follow the simulator, so they reveal when a
-Wrap/Bind/Fire Spin/Clamp lock has silently ended (0.2% of steps; docs/CLIENT.md).
+(the opponent's unrevealed Pokémon and moves are unknown, HP is a percentage); state hidden from
+both players, such as how long partial trapping lasts, is estimated from the protocol, never read
+from the simulator (docs/CLIENT.md).
 [docs/OBSERVATION.md](docs/OBSERVATION.md) has the layout;
 [docs/OBSERVATION_RULES.md](docs/OBSERVATION_RULES.md) the visibility rules.
 

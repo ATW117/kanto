@@ -3,10 +3,9 @@
 //!
 //! `CLIENT_GAMES` (default 300) sets the number of battles; `CLIENT_TEAMS` a team pool path.
 //!
-//! Every field must match except the partial-trapping ones: how long Wrap/Bind/Fire Spin/Clamp
-//! lasts (2-5 hits) is hidden from both players, but the env observation shows whether the lock
-//! continues. The client predicts it from the hit count; those differences are reported, and must
-//! stay rare.
+//! Every field must match: the env observation holds only what a player can know. Hidden state
+//! (how long Wrap/Bind/Fire Spin/Clamp lasts, a recharge cancelled by a flinch) is estimated from
+//! the protocol the same way in both (`memory::SideTrack`).
 #![allow(clippy::needless_range_loop)]
 
 use kanto_env::backend::NUM_ACTIONS;
@@ -26,10 +25,6 @@ fn pool() -> TeamSource {
         TeamSource::Pool(builtin_teams())
     }
 }
-
-/// Observation fields that depend on the hidden partial-trapping duration.
-const HIDDEN: [&str; 6] =
-    ["own_active+33", "own_active+34", "own_active+43", "opp_active+33", "opp_active+34", "opp_active+43"];
 
 fn field(off: usize) -> String {
     let mut best = ("?".to_string(), 0usize);
@@ -57,7 +52,7 @@ fn client_matches_env() {
     let games: u64 = std::env::var("CLIENT_GAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(300);
     let strict = std::env::var("CLIENT_STRICT").map(|s| s != "0").unwrap_or(true);
     let source = pool();
-    let (mut steps, mut bad_steps, mut hidden_steps) = (0u64, 0u64, 0u64);
+    let (mut steps, mut bad_steps) = (0u64, 0u64);
     let mut by_field: std::collections::BTreeMap<String, u64> = Default::default();
     for seed in 0..games {
         let mut rng = Rng::new(seed);
@@ -90,13 +85,7 @@ fn client_matches_env() {
                 let mask = cl[p].mask();
                 let mut diffs = Vec::new();
                 let only = std::env::var("CLIENT_FIELD").ok();
-                let mut hidden_diff = false;
                 for k in 0..OBS_DIM {
-                    if want[k] != got[k] && only.is_none() && HIDDEN.contains(&field(k).as_str()) {
-                        hidden_diff = true;
-                        *by_field.entry(field(k)).or_default() += 1;
-                        continue;
-                    }
                     if want[k] != got[k] && only.as_deref().is_none_or(|f| field(k) == f) {
                         diffs.push(format!("{} want {} got {}", field(k), want[k], got[k]));
                         *by_field.entry(field(k)).or_default() += 1;
@@ -123,7 +112,6 @@ fn client_matches_env() {
                         }
                     }
                 }
-                hidden_steps += hidden_diff as u64;
                 if !diffs.is_empty() {
                     bad_steps += 1;
                     if strict {
@@ -169,10 +157,9 @@ fn client_matches_env() {
         }
     }
     eprintln!(
-        "client: {steps} player-steps, {bad_steps} with differences, {hidden_steps} with hidden partial-trapping differences; by field: {by_field:?}"
+        "client: {steps} player-steps, {bad_steps} with differences; by field: {by_field:?}"
     );
     assert_eq!(bad_steps, 0);
-    assert!(hidden_steps * 100 < steps, "partial-trapping estimates differ too often");
 }
 
 /// Live servers also send room messages (chat, joins, timer notices) and may send the battle
@@ -215,7 +202,7 @@ fn client_ignores_room_messages() {
                 g.observe(p, &mut want);
                 cl[p].observe(&mut got);
                 for k in 0..OBS_DIM {
-                    if want[k] != got[k] && !HIDDEN.contains(&field(k).as_str()) {
+                    if want[k] != got[k] {
                         panic!("seed {seed} player {}: {} want {} got {}", p + 1, field(k), want[k], got[k]);
                     }
                 }
@@ -280,7 +267,7 @@ fn determinize_matches_observation() {
                         cl[p].observe(&mut want);
                         env.observe(p, &Default::default(), &mut got);
                         for k in 0..OBS_DIM {
-                            if want[k] != got[k] && !HIDDEN.contains(&field(k).as_str()) {
+                            if want[k] != got[k] {
                                 panic!("seed {seed} turn {} player {}: {} client {} rebuilt {}", g.battle().turn, p + 1, field(k), want[k], got[k]);
                             }
                         }
