@@ -9,6 +9,7 @@ description = "Showdown-exact Gen 1 battle simulator in Rust, with a fast batche
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 authors = [{ name = "ATW117" }]
 keywords = ["simulator", "showdown", "gen1", "reinforcement-learning", "environment"]
 classifiers = [
@@ -31,6 +32,15 @@ manifest-path = "crates/kanto-py/Cargo.toml"
 python-source = "python"
 module-name = "kanto._kanto"
 features = ["pyo3/extension-module"]
+# The sdist must build on its own: the team pool the extension embeds (include_str!), the
+# optional pkmn-sys crate's manifest (cargo resolves every workspace dependency), and the notices.
+include = [
+    { path = "data/teams/gen1ou/teams.jsonl", format = "sdist" },
+    { path = "data/teams/gen1ou/split/*.jsonl", format = "sdist" },
+    { path = "tests/fixtures/teams/gen1ou_builtin.json", format = "sdist" },
+    { path = "crates/pkmn-sys/**/*", format = "sdist" },
+    { path = "THIRD_PARTY_NOTICES.md", format = "sdist" },
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/python"]

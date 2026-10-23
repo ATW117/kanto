@@ -286,6 +286,10 @@ macro_rules! native_backend {
                 b.rng = Prng::from_u64(seed);
             }
 
+            fn can_reseed() -> bool {
+                true
+            }
+
             fn update(b: &mut Battle, c1: Choice, c2: Choice, mem: &mut [Memory; 2]) -> Outcome {
                 let mut buf = EventBuf::default();
                 let turn_before = b.turn;

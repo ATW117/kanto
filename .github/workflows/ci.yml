@@ -4,12 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "17 5 * * 1" # weekly: the larger parity fuzz
   workflow_dispatch:
-    inputs:
-      parity:
-        description: "Also run a short Showdown parity fuzz (installs pokemon-showdown@0.11.11)"
-        type: boolean
-        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -30,11 +27,13 @@ jobs:
       - name: Python extension
         run: |
           uv venv --python 3.12 .venv
-          uv pip install --python .venv/bin/python maturin numpy pytest gymnasium
+          uv pip install --python .venv/bin/python maturin numpy pytest gymnasium "poke-env==0.16.1" "websockets>=12"
           source .venv/bin/activate
           maturin develop --release
-      - name: pytest
-        run: .venv/bin/pytest -q
+      - name: pytest (kanto.server with unmodified poke-env must run, not skip)
+        run: |
+          .venv/bin/pytest -q -rs | tee pytest.log
+          ! grep -E "SKIPPED.*test_server" pytest.log
       - name: Python benchmark (smoke)
         run: .venv/bin/python bench/bench.py --quick --threads 2 --envs 256
 
@@ -57,23 +56,37 @@ jobs:
         run: cargo test --release --workspace --all-features
 
   parity:
-    name: Showdown parity fuzz (optional)
-    if: github.event_name == 'workflow_dispatch' && inputs.parity
+    # Pinned Showdown 0.11.11. Every push/PR: a small fuzz, the fixtures and the Node interop
+    # tests (which skip without PS_DIR). Weekly or on demand: the larger fuzz.
+    name: Showdown parity
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: Install pokemon-showdown 0.11.11
         run: mkdir -p "$RUNNER_TEMP/ps" && cd "$RUNNER_TEMP/ps" && npm install pokemon-showdown@0.11.11
-      - name: parity fuzz (state, then protocol)
+      - name: parity fuzz (state, then protocol) and fixtures
+        env:
+          LARGE: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         run: |
           export PS_DIR="$RUNNER_TEMP/ps/node_modules/pokemon-showdown" NODE="$(which node)"
+          k=1; [ "$LARGE" = true ] && k=6
           fuzz() { cargo run --release -p kanto-parity --bin parity -- fuzz --jobs 2 "$@" | tee fuzz.log; grep -q "; diverged 0 (" fuzz.log; }
-          fuzz --battles 1000 --teams mixed
-          fuzz --battles 500 --teams targeted
-          fuzz --proto --battles 500 --teams mixed
+          fuzz --battles $((500 * k)) --teams mixed
+          fuzz --battles $((300 * k)) --teams targeted
+          fuzz --proto --battles $((300 * k)) --teams mixed
           cargo run --release -p kanto-parity --bin parity -- fixtures
+      - name: Showdown interop tests (must run, not skip)
+        run: |
+          export PS_DIR="$RUNNER_TEMP/ps/node_modules/pokemon-showdown" NODE="$(which node)"
+          uv venv --python 3.12 .venv
+          uv pip install --python .venv/bin/python maturin numpy pytest
+          source .venv/bin/activate
+          maturin develop --release
+          pytest -q -rs tests/python/test_showdown_interop.py tests/python/test_battle_stream.py | tee interop.log
+          ! grep -q SKIPPED interop.log

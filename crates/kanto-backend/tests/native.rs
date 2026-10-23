@@ -67,6 +67,7 @@ impl Bufs {
             turns: &mut self.turns,
             opp_action: &mut self.opp_action,
             error: &mut self.error,
+            final_obs: None,
         }
     }
 }
@@ -122,7 +123,7 @@ fn clone_restore<B: Backend>() {
         first.push((b.obs.clone(), b.mask.clone(), b.reward.clone(), b.done.clone()));
     }
     for (i, blob) in blobs.iter().enumerate() {
-        v.restore_state(i, blob).unwrap();
+        v.restore_state(i, blob, None).unwrap();
         assert_eq!(&v.clone_state(i), blob);
     }
     rng = saved;
@@ -134,17 +135,50 @@ fn clone_restore<B: Backend>() {
         assert_eq!(f.2, b.reward);
         assert_eq!(f.3, b.done);
     }
-    assert!(v.restore_state(0, &[1, 2, 3]).is_err());
+    assert!(v.restore_state(0, &[1, 2, 3], None).is_err());
     let mut bad = blobs[0].clone();
     bad[100] = 0xFF;
     // Corrupting a byte must either be rejected or decode to *some* valid battle.
-    let _ = v.restore_state(0, &bad);
+    let _ = v.restore_state(0, &bad, None);
 }
 
 #[test]
 fn clone_restore_round_trip() {
     clone_restore::<Native1>();
     clone_restore::<Native1Nc>();
+}
+
+/// `restore_state(.., Some(seed))`: one seed replays one future, different seeds sample different
+/// ones (the action sequence is a function of the states, so only chance makes them differ).
+#[test]
+fn restore_with_seed_samples_independent_futures() {
+    let n = 32;
+    let mut v = VecEnv::<Native1>::new(n, 5, pool(), EnvConfig::default(), 2);
+    let mut b = Bufs::new(n);
+    v.reset(None, &mut b.obs, &mut b.mask);
+    let mut rng = Rng::new(3);
+    for _ in 0..10 {
+        let acts = random_actions(&v, &mut rng);
+        v.step(&acts, b.out()).unwrap();
+    }
+    let blob = v.clone_state(0);
+    let play = |v: &mut VecEnv<Native1>, b: &mut Bufs, seed: Option<u64>| -> Vec<u8> {
+        for i in 0..n {
+            v.restore_state(i, &blob, seed).unwrap();
+        }
+        let mut r = Rng::new(9);
+        for _ in 0..8 {
+            let acts = random_actions(v, &mut r);
+            v.step(&acts, b.out()).unwrap();
+        }
+        v.clone_state(0)
+    };
+    let a = play(&mut v, &mut b, Some(100));
+    assert_eq!(play(&mut v, &mut b, Some(100)), a, "same seed, same future");
+    let futures: std::collections::HashSet<Vec<u8>> = (0..8u64).map(|s| play(&mut v, &mut b, Some(1000 * s))).collect();
+    assert!(futures.len() > 1, "different seeds should not all replay one future");
+    let none = play(&mut v, &mut b, None);
+    assert_eq!(play(&mut v, &mut b, None), none, "without a seed a restore replays the blob's stream");
 }
 
 fn terminate<B: Backend>() {
@@ -513,7 +547,7 @@ fn step_out<'a>(
     obs: &'a mut [f32], mask: &'a mut [bool], reward: &'a mut [f32], done: &'a mut [bool], truncated: &'a mut [bool],
     outcome: &'a mut [i8], turns: &'a mut [u32], opp_action: &'a mut [i16], error: &'a mut [bool],
 ) -> StepOut<'a> {
-    StepOut { obs, mask, reward, done, truncated, outcome, turns, opp_action, error }
+    StepOut { obs, mask, reward, done, truncated, outcome, turns, opp_action, error, final_obs: None }
 }
 
 /// `lookahead` plays legal moves, and as player 2 beats `max_damage` (player 1) more often than not.

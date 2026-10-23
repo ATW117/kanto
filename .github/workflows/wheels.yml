@@ -5,10 +5,10 @@ name: wheels
 # team pool is embedded in the extension). Runs on tags and on demand; publishing to PyPI is a
 # separate, manual step (PyPI trusted publishing, `uv publish`, ...).
 #
-# Status: written during the 2026-10 audit and checked locally only for Linux aarch64
-# (`maturin build --release` + the smoke test below); the other targets have not been run.
-# No sdist: `maturin sdist` currently produces an archive that does not build (workspace members
-# and the embedded team data are missing; docs/AUDIT_2026-10.md).
+# Status: checked locally only for Linux aarch64 (wheel, and a wheel built from the sdist, each
+# installed in a fresh venv and smoke-tested outside the checkout); the other targets have not
+# been run yet. The sdist carries what the extension embeds (team pool, builtin fixture) and the
+# optional pkmn-sys manifest (pyproject.toml [tool.maturin] include).
 
 on:
   push:
@@ -25,7 +25,7 @@ jobs:
         include:
           - { os: ubuntu-latest, target: x86_64, manylinux: "2014" }
           - { os: ubuntu-24.04-arm, target: aarch64, manylinux: "2014" }
-          - { os: macos-13, target: x86_64 }
+          - { os: macos-15-intel, target: x86_64 }
           - { os: macos-14, target: aarch64 }
           - { os: windows-latest, target: x64 }
     steps:
@@ -44,6 +44,7 @@ jobs:
           python -m pip install numpy
           python -m pip install --no-index --find-links dist kanto
           cd "$RUNNER_TEMP"
+          python -c "import importlib.metadata as m; f = m.files('kanto'); assert any(p.name == 'THIRD_PARTY_NOTICES.md' for p in f), 'notices missing'"
           python - <<'EOF'
           import numpy as np, kanto
           env = kanto.VecEnv(num_envs=16, seed=0, teams=kanto.TEAMS_EVAL, threads=2, opponent="random")
@@ -60,3 +61,26 @@ jobs:
           name: wheel-${{ matrix.os }}-${{ matrix.target }}
           path: dist/*.whl
 
+  sdist:
+    name: sdist (built, then built into a wheel from the archive alone)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - name: build and smoke-test a wheel from the sdist (outside the checkout)
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP"
+          python -m venv v && v/bin/pip install numpy "$GITHUB_WORKSPACE"/dist/*.tar.gz
+          v/bin/python -c "import numpy as np, kanto; e = kanto.VecEnv(8, seed=0, teams=kanto.TEAMS_EVAL, threads=2, opponent='random'); o, m = e.reset(); print('ok', o.shape)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz

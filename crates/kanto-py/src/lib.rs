@@ -87,12 +87,25 @@ struct VecEnv {
     turns: Py<PyArray1<u32>>,
     opp_action: Py<PyArray2<i16>>,
     error: Py<PyArray1<bool>>,
+    final_obs: Option<Py<PyArray3<f32>>>,
+    release_gil: bool,
+}
+
+/// Run `f` with the GIL released if `release`, else holding it. `reset`/`step` write straight
+/// into the NumPy arrays they return; while the GIL is held, no other Python thread can read or
+/// write those arrays mid-update.
+fn maybe_detach<T: Send>(py: Python<'_>, release: bool, f: impl FnOnce() -> T + Send) -> T {
+    if release {
+        py.detach(f)
+    } else {
+        f()
+    }
 }
 
 #[pymethods]
 impl VecEnv {
     #[new]
-    #[pyo3(signature = (num_envs, seed=0, teams="data/teams/gen1ou", threads=16, opponent=None, max_turns=1000, reveal_hidden=false, backend="native", validate=true))]
+    #[pyo3(signature = (num_envs, seed=0, teams="data/teams/gen1ou", threads=16, opponent=None, max_turns=1000, reveal_hidden=false, backend="native", validate=true, release_gil=false, final_obs=false))]
     fn new(
         py: Python<'_>,
         num_envs: usize,
@@ -104,6 +117,8 @@ impl VecEnv {
         reveal_hidden: bool,
         backend: &str,
         validate: bool,
+        release_gil: bool,
+        final_obs: bool,
     ) -> PyResult<Self> {
         if num_envs == 0 {
             return Err(PyValueError::new_err("num_envs must be > 0"));
@@ -132,6 +147,8 @@ impl VecEnv {
             turns: PyArray1::<u32>::zeros(py, n, false).unbind(),
             opp_action: PyArray2::<i16>::zeros(py, [n, 2], false).unbind(),
             error: PyArray1::<bool>::zeros(py, n, false).unbind(),
+            final_obs: final_obs.then(|| PyArray3::<f32>::zeros(py, [n, 2, OBS_DIM], false).unbind()),
+            release_gil,
         })
     }
 
@@ -141,10 +158,11 @@ impl VecEnv {
         let obs = self.obs.bind(py);
         let mask = self.mask.bind(py);
         // SAFETY: the arrays are owned by this object, C-contiguous, and not resized; we hold
-        // `&mut self`, so no other Rust code touches them while we write.
+        // `&mut self`, so no other Rust code touches them while we write, and unless the caller
+        // opted into `release_gil` we keep the GIL, so no Python thread does either.
         let (o, m) = unsafe { (obs.as_slice_mut()?, mask.as_slice_mut()?) };
         let inner = &mut self.inner;
-        py.detach(|| with_inner!(inner, v => v.reset(seed, o, m)));
+        maybe_detach(py, self.release_gil, || with_inner!(inner, v => v.reset(seed, o, m)));
         Ok((self.obs.clone_ref(py), self.mask.clone_ref(py)))
     }
 
@@ -158,7 +176,14 @@ impl VecEnv {
         if actions.shape() != [n, 2] {
             return Err(PyValueError::new_err(format!("actions must have shape ({n}, 2), got {:?}", actions.shape())));
         }
-        let acts = actions.as_slice()?;
+        // With the GIL released, another Python thread could write `actions` mid-step: copy it.
+        let owned;
+        let acts = if self.release_gil {
+            owned = actions.as_slice()?.to_vec();
+            &owned[..]
+        } else {
+            actions.as_slice()?
+        };
         let (obs, mask, reward, done, outcome_arr, turns, truncated, opp_action, error) = (
             self.obs.bind(py),
             self.mask.bind(py),
@@ -170,6 +195,7 @@ impl VecEnv {
             self.opp_action.bind(py),
             self.error.bind(py),
         );
+        let final_obs = self.final_obs.as_ref().map(|f| f.bind(py));
         // SAFETY: as in `reset`.
         let out = unsafe {
             StepOut {
@@ -182,16 +208,23 @@ impl VecEnv {
                 turns: turns.as_slice_mut()?,
                 opp_action: opp_action.as_slice_mut()?,
                 error: error.as_slice_mut()?,
+                final_obs: match &final_obs {
+                    Some(f) => Some(f.as_slice_mut()?),
+                    None => None,
+                },
             }
         };
         let inner = &mut self.inner;
-        py.detach(|| with_inner!(inner, v => v.step(acts, out).map_err(|e| e.to_string()))).map_err(PyValueError::new_err)?;
+        maybe_detach(py, self.release_gil, || with_inner!(inner, v => v.step(acts, out).map_err(|e| e.to_string()))).map_err(PyValueError::new_err)?;
         let info = PyDict::new(py);
         info.set_item("outcome", outcome_arr)?;
         info.set_item("turns", turns)?;
         info.set_item("truncated", truncated)?;
         info.set_item("opp_action_obs_frame", opp_action)?;
         info.set_item("error", error)?;
+        if let Some(f) = final_obs {
+            info.set_item("final_obs", f)?;
+        }
         let errors: Vec<(usize, String)> = with_inner!(&self.inner, v => v.errors.clone());
         info.set_item("errors", errors)?;
         (obs, mask, reward, done, info).into_pyobject(py)
@@ -218,9 +251,12 @@ impl VecEnv {
     }
 
     /// Restore env `i` from `clone_state` bytes and refresh its rows of the obs/mask buffers.
-    fn restore_state(&mut self, py: Python<'_>, i: usize, blob: &[u8]) -> PyResult<()> {
+    /// With `seed`, the restored env's RNG streams are replaced by ones derived from `seed`, so
+    /// restores of one blob with different seeds sample independent futures (native backends).
+    #[pyo3(signature = (i, blob, seed=None))]
+    fn restore_state(&mut self, py: Python<'_>, i: usize, blob: &[u8], seed: Option<u64>) -> PyResult<()> {
         self.check(i)?;
-        with_inner!(&mut self.inner, v => v.restore_state(i, blob)).map_err(PyValueError::new_err)?;
+        with_inner!(&mut self.inner, v => v.restore_state(i, blob, seed)).map_err(PyValueError::new_err)?;
         let obs = self.obs.bind(py);
         let mask = self.mask.bind(py);
         let (o, m) = unsafe { (obs.as_slice_mut()?, mask.as_slice_mut()?) };

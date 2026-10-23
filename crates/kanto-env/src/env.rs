@@ -267,6 +267,12 @@ impl<B: Backend> Env<B> {
     /// Play one update. Actions must be legal (check with `is_legal` first). Auto-resets when
     /// the game ends.
     pub fn step(&mut self, a1: usize, a2: usize, cfg: &EnvConfig, source: &TeamSource) -> StepResult {
+        self.step_with(a1, a2, cfg, source, |_| {})
+    }
+
+    /// [`Env::step`], calling `on_done` with the finished game's final state just before the
+    /// auto-reset (e.g. to record terminal observations).
+    pub fn step_with(&mut self, a1: usize, a2: usize, cfg: &EnvConfig, source: &TeamSource, on_done: impl FnOnce(&Self)) -> StepResult {
         if std::mem::take(&mut self.inject_panic) {
             panic!("injected panic (Env::inject_panic test hook)");
         }
@@ -299,6 +305,7 @@ impl<B: Backend> Env<B> {
         };
         let done = code != outcome::ONGOING;
         if done {
+            on_done(self);
             self.reset(source);
         } else {
             self.refresh();

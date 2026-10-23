@@ -148,6 +148,82 @@ def test_gymnasium_wrapper():
     assert finished > 0
 
 
+def test_gymnasium_final_observation_and_reset():
+    pytest.importorskip("gymnasium")
+    from kanto.gym import Gen1Env
+
+    env = Gen1Env(opponent="max_damage", teams="builtin", max_turns=3)
+    obs, _ = env.reset(seed=1)
+    rng = np.random.default_rng(0)
+    for _ in range(200):
+        prev = obs
+        obs, r, term, trunc, info = env.step(int(rng.choice(np.flatnonzero(obs["action_mask"]))))
+        if term or trunc:
+            break
+    assert trunc and not obs["action_mask"].any()  # the turn cap: the final observation, not a new game's
+    assert not np.array_equal(obs["obs"], prev["obs"])
+    # reset() after a game ended hands out the auto-started game; mid-game it starts a new one
+    calls = []
+    inner = env._env.reset
+    env._env.reset = lambda seed=None: calls.append(seed) or inner(seed)
+    nxt, _ = env.reset()
+    assert calls == [] and nxt["action_mask"].any() and not np.array_equal(nxt["obs"], obs["obs"])
+    env.step(int(np.flatnonzero(nxt["action_mask"])[0]))
+    env.reset()
+    assert calls == [None]
+
+
+def test_final_obs_is_the_last_state():
+    """``info["final_obs"]`` equals what the env would show if the game had not ended there."""
+    short = pe.VecEnv(num_envs=4, seed=2, teams="data/teams/gen1ou", threads=1, max_turns=4, final_obs=True)
+    long = pe.VecEnv(num_envs=4, seed=2, teams="data/teams/gen1ou", threads=1, max_turns=1000)
+    _, mask = short.reset()
+    long.reset()
+    rng = np.random.default_rng(5)
+    for _ in range(50):
+        for i in range(4):
+            long.restore_state(i, short.clone_state(i))
+        acts = sample_legal(mask, rng)
+        _, mask, _, done, info = short.step(acts)
+        lobs, *_ = long.step(acts)
+        if done.any():
+            i = int(np.flatnonzero(done)[0])
+            if info["truncated"][i] and info["outcome"][i] == 4:
+                np.testing.assert_array_equal(info["final_obs"][i], lobs[i])
+                return
+    pytest.fail("no truncated game")
+
+
+def test_restore_with_seed_samples_independent_futures():
+    env = pe.VecEnv(num_envs=8, seed=0, teams="data/teams/gen1ou", threads=1)
+    _, mask = env.reset()
+    rng = np.random.default_rng(1)
+    for _ in range(5):
+        _, mask, *_ = env.step(sample_legal(mask, rng))
+    blob = env.clone_state(0)
+
+    def future(seed):
+        for i in range(8):
+            env.restore_state(i, blob, seed=seed)  # refreshes the returned obs/mask in place
+        r = np.random.default_rng(7)
+        m = mask
+        for _ in range(6):
+            _, m, *_ = env.step(sample_legal(m, r))
+        return env.clone_state(0)
+
+    assert future(11) == future(11)
+    assert len({future(s) for s in range(8)}) > 1
+    assert future(None) == future(None)
+
+
+def test_release_gil_steps():
+    env = pe.VecEnv(num_envs=8, seed=0, teams="data/teams/gen1ou", threads=2, release_gil=True)
+    _, mask = env.reset()
+    rng = np.random.default_rng(0)
+    for _ in range(50):
+        _, mask, *_ = env.step(sample_legal(mask, rng))
+
+
 # ---- Native (Showdown-exact) backend ---------------------------------------------------------
 
 

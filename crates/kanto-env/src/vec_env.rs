@@ -4,7 +4,7 @@
 use crate::backend::{Backend, NUM_ACTIONS};
 use crate::env::{Env, EnvConfig, StepResult};
 use crate::obs::OBS_DIM;
-use crate::rng::derive_seed;
+use crate::rng::{derive_seed, Rng};
 use crate::team::TeamSource;
 use rayon::prelude::*;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -68,6 +68,10 @@ pub struct StepOut<'a> {
     pub opp_action: &'a mut [i16],
     /// [N] the simulator panicked in this env this step (outcome `ERROR`; the env was reset).
     pub error: &'a mut [bool],
+    /// Optional [N, 2, OBS_DIM]: for envs whose game ended this step (`done`), both players'
+    /// observations of the final state, before the auto-reset (rows of other envs are left
+    /// untouched; after a simulator error the row is zeros). `obs` then holds the next game.
+    pub final_obs: Option<&'a mut [f32]>,
 }
 
 #[derive(Debug)]
@@ -140,6 +144,8 @@ impl<B: Backend> VecEnv<B> {
         let cfg = &self.cfg;
         let errors = std::sync::Mutex::new(Vec::new());
         let fatal = std::sync::Mutex::new(None);
+        let want_final = out.final_obs.is_some();
+        let finals = std::sync::Mutex::new(Vec::<(usize, Vec<f32>)>::new());
         self.pool.install(|| {
             self.envs
                 .par_iter_mut()
@@ -162,7 +168,16 @@ impl<B: Backend> VecEnv<B> {
                             Some(kind) => env.opponent_action(kind),
                             None => a[1] as usize,
                         };
-                        let r: StepResult = env.step(a1, a2, cfg, source);
+                        let r: StepResult = if want_final {
+                            env.step_with(a1, a2, cfg, source, |e| {
+                                let mut fo = vec![0f32; 2 * OBS_DIM];
+                                let mut fm = [false; 2 * NUM_ACTIONS];
+                                write_obs(e, cfg, &mut fo, &mut fm);
+                                finals.lock().unwrap().push((i, fo));
+                            })
+                        } else {
+                            env.step(a1, a2, cfg, source)
+                        };
                         write_obs(env, cfg, obs, mask);
                         r
                     }));
@@ -190,6 +205,9 @@ impl<B: Backend> VecEnv<B> {
                             if !recovered {
                                 fatal.lock().unwrap().get_or_insert((i, last));
                             }
+                            if want_final {
+                                finals.lock().unwrap().push((i, vec![0f32; 2 * OBS_DIM]));
+                            }
                             StepResult {
                                 reward: 0.0,
                                 done: true,
@@ -208,6 +226,11 @@ impl<B: Backend> VecEnv<B> {
                     opp_action.copy_from_slice(&r.opp_action);
                 });
         });
+        if let Some(fo) = out.final_obs {
+            for (i, row) in finals.into_inner().unwrap() {
+                fo[i * 2 * OBS_DIM..(i + 1) * 2 * OBS_DIM].copy_from_slice(&row);
+            }
+        }
         let mut errors = errors.into_inner().unwrap();
         errors.sort_by_key(|e| e.0);
         self.total_errors += errors.len() as u64;
@@ -248,8 +271,20 @@ impl<B: Backend> VecEnv<B> {
         self.envs[i].to_bytes()
     }
 
-    pub fn restore_state(&mut self, i: usize, blob: &[u8]) -> Result<(), String> {
-        self.envs[i] = Env::from_bytes(blob).ok_or("malformed env state blob")?;
+    /// Restore env `i` from a `clone_state` blob. With `seed`, the battle's RNG and the env's own
+    /// RNG (built-in opponent, auto-reset) are then replaced by streams derived from `seed`, so
+    /// several restores of one blob sample independent futures; the same seed replays the same
+    /// future. Without `seed`, the restored env continues the blob's RNG streams exactly.
+    pub fn restore_state(&mut self, i: usize, blob: &[u8], seed: Option<u64>) -> Result<(), String> {
+        let mut env = Env::from_bytes(blob).ok_or("malformed env state blob")?;
+        if let Some(s) = seed {
+            if !B::can_reseed() {
+                return Err("this backend cannot reseed a restored battle (use the native backend)".into());
+            }
+            B::reseed(&mut env.battle, s);
+            env.rng = Rng::new(s ^ 0x5EED_0F_E4_7A7E);
+        }
+        self.envs[i] = env;
         Ok(())
     }
 

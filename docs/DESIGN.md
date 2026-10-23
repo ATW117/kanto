@@ -60,13 +60,20 @@ Notes:
 env = kanto.VecEnv(num_envs=N, seed=0, teams="data/teams/gen1ou", threads=16)
 obs, mask = env.reset()          # obs: float32[N, 2, OBS_DIM], mask: bool[N, 2, NUM_ACTIONS]
 obs, mask, reward, done, info = env.step(actions)   # actions: int16[N, 2]
-env.clone_state(i) -> bytes / env.restore_state(i, blob)   # for search
+env.clone_state(i) -> bytes / env.restore_state(i, blob, seed=None)   # for search
 ```
 Implemented details: `reward` is float32[N, 2]; `info` = {`outcome` int8[N] (0 ongoing, 1 p1 win,
 2 p2 win, 3 tie, 4 truncated, 5 error), `truncated` bool[N], `turns` uint32[N],
 `opp_action_obs_frame` int16[N, 2] (the opponent's choice in each player's frame, an auxiliary
 target; docs/OBSERVATION.md), `error` bool[N] and `errors` [(env, message)]}; output arrays are
-reused in place every call (copy to keep). `teams` may also be `"random"` (legal Gen 1 learnsets),
+reused in place every call (copy to keep). `reset`/`step` hold the GIL while they write them, so
+no other Python thread sees a half-written step; `release_gil=True` lets other Python threads run
+during a step, and the caller must then not touch those arrays (or `actions`, which is copied)
+until it returns. `restore_state(i, blob, seed)` replaces the restored env's RNG streams with ones
+derived from `seed` (native backends), so restores of one blob sample independent futures; without
+`seed` the restore continues the blob's own streams, replaying the same future. With
+`final_obs=True`, `info["final_obs"]` float32[N, 2, OBS_DIM] holds, where `done`, both players'
+observations of the finished game's last state (the auto-reset otherwise hides it). `teams` may also be `"random"` (legal Gen 1 learnsets),
 `"randbats"` (Showdown Gen 1 random-battle sets), `"builtin"` (fixtures) or
 `"data/teams/gen1ou:train"` / `":eval"` (the pool's deterministic 90/10 split). Pool teams are
 checked for Gen 1 legality (Species Clause, learnsets) unless `validate=False`. `reveal_hidden=False`

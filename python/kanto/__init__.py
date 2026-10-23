@@ -129,6 +129,12 @@ class VecEnv:
         validate: check pool teams for Gen 1 legality: Species Clause (no duplicate species)
             and learnsets. ``False`` allows such teams. Unknown names, out-of-range DVs/levels
             and malformed teams are always errors.
+        release_gil: ``reset``/``step`` write into the arrays they return (the same arrays every
+            call) and by default hold the GIL while doing so, so no other Python thread can see a
+            half-written step. ``True`` lets other Python threads run during a step; they must
+            not touch those arrays until it returns.
+        final_obs: also return ``info["final_obs"]`` (below). Off by default: it encodes every
+            finished game's last state a second time.
     """
 
     def __init__(
@@ -142,9 +148,13 @@ class VecEnv:
         reveal_hidden: bool = False,
         backend: str = "native",
         validate: bool = True,
+        release_gil: bool = False,
+        final_obs: bool = False,
     ) -> None:
+        # Passed only when set, so this wrapper still loads an extension built before the option.
+        extra = {k: True for k, v in (("release_gil", release_gil), ("final_obs", final_obs)) if v}
         self._env = _native.VecEnv(
-            num_envs, seed, _resolve_teams(teams), threads, opponent, max_turns, reveal_hidden, backend, validate
+            num_envs, seed, _resolve_teams(teams), threads, opponent, max_turns, reveal_hidden, backend, validate, **extra
         )
         self.backend = backend
         self.num_envs = num_envs
@@ -179,6 +189,9 @@ class VecEnv:
         - ``error`` bool[N] and ``errors`` (list of ``(env index, message)``): the simulator
           panicked in that env. Its game ends with outcome 5 (``done`` and ``truncated`` set,
           reward 0) and the env is reset; other envs are unaffected.
+        - ``final_obs`` float32[N, 2, OBS_DIM] (only with ``final_obs=True``): where ``done``, both players' observations of the
+          finished game's last state (for bootstrapping truncated games); zeros after an error.
+          Other rows are stale.
 
         Raises ``ValueError`` on an illegal action without modifying any env.
         """
@@ -194,9 +207,17 @@ class VecEnv:
         """Snapshot env ``i`` (battle, reveal memories, RNG) for search."""
         return self._env.clone_state(i)
 
-    def restore_state(self, i: int, blob: bytes) -> None:
-        """Restore env ``i``; its rows of the last returned obs/mask buffers are refreshed."""
-        self._env.restore_state(i, blob)
+    def restore_state(self, i: int, blob: bytes, seed: Optional[int] = None) -> None:
+        """Restore env ``i``; its rows of the last returned obs/mask buffers are refreshed.
+
+        Without ``seed`` the env continues the blob's RNG streams, so it replays the same future
+        for the same actions. With ``seed`` (native backends) the streams are replaced by ones
+        derived from ``seed``: restores of one blob with different seeds sample independent
+        futures (search rollouts), and the same seed replays the same one."""
+        if seed is None:
+            self._env.restore_state(i, blob)
+        else:
+            self._env.restore_state(i, blob, seed)
 
     def builtin_actions(self, kind: str, seats: np.ndarray) -> np.ndarray:
         """int16[N]: built-in policy ``kind`` ("random" | "max_damage" | "lookahead")'s legal
