@@ -149,9 +149,10 @@ def test_unsupported_input_raises():
 def node_simulate(ps_dir: str, text: str) -> str:
     r = subprocess.run(
         ["node", os.path.join(ps_dir, "pokemon-showdown"), "simulate-battle", "--skip-build"],
-        input=text, capture_output=True, text=True, timeout=120,
+        input=text.encode("utf-8"), capture_output=True, timeout=120,
     )
-    return r.stdout
+    # Bytes, not text mode: on Windows text mode writes cp1252 and turns "\n" into "\r\n".
+    return r.stdout.decode("utf-8")
 
 
 @pytest.mark.skipif(not (os.environ.get("PS_DIR") and shutil.which("node")), reason="needs PS_DIR and node")

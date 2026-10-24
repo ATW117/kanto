@@ -72,8 +72,9 @@ impl Args {
 }
 
 fn repo_root() -> PathBuf {
-    let here = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    here.join("../..").canonicalize().unwrap_or(here)
+    // Not `canonicalize`: on Windows it returns a `\\?\` path, which Node cannot open.
+    let here = Path::new(env!("CARGO_MANIFEST_DIR"));
+    here.parent().and_then(Path::parent).unwrap_or(here).to_path_buf()
 }
 
 /// A failing battle as stored in failures.jsonl / fixtures.
@@ -359,6 +360,11 @@ fn fuzz(args: &Args) {
     std::fs::write(out.join("report.json"), serde_json::to_string_pretty(&report).unwrap()).unwrap();
     std::fs::write(out.join("showdown_errors.txt"), errors.join("\n")).unwrap();
     print_report(&report, started.elapsed().as_secs_f64(), &format, &patch, &args.get("teams", "mixed"));
+    if compared == 0 && report.battles > 0 {
+        // Otherwise a Showdown that never ran reads as "diverged 0".
+        eprintln!("error: no battle was compared with Showdown; see {}", out.join("showdown_errors.txt").display());
+        std::process::exit(1);
+    }
     if let Some(file) = &corpus_dir {
         if let Some(parent) = file.parent() {
             std::fs::create_dir_all(parent).unwrap();
