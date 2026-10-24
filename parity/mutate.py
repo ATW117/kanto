@@ -148,7 +148,7 @@ def run(cmd, **kw):
 
 def make_work_copy(work: Path) -> Path:
     src = work / "src"
-    ignore = shutil.ignore_patterns("target", ".git", ".venv", "out", "runs", ".claude", "__pycache__", "*.so")
+    ignore = shutil.ignore_patterns("target", ".git", ".venv", "out", "runs", "__pycache__", "*.so")
     if src.exists():
         # Refresh sources, keep the copy's target dir for incremental builds.
         for sub in ["crates", "parity", "tests", "tools", "Cargo.toml", "Cargo.lock", "rustfmt.toml"]:
