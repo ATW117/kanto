@@ -28,10 +28,6 @@ import sys
 from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_PS = (
-    "/tmp/claude-1000/-home-azimuth-projects-pokemon/5dd1f50b-dc9e-47b6-bc32-c02aff9d36ad/"
-    "scratchpad/simsurvey/ps/node_modules/pokemon-showdown"
-)
 STATS = ("hp", "atk", "def", "spe", "spc")
 # schema stat -> Showdown stat ids (Gen 1 Special is stored as spa=spd in Showdown)
 PS_STAT = {"hp": ["HP"], "atk": ["Atk"], "def": ["Def"], "spe": ["Spe"], "spc": ["SpA", "SpD"]}
@@ -154,8 +150,8 @@ def showdown_problems(teams, node: str, ps: str, fmt: str, batch: int = 2000) ->
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("files", nargs="*")
-    ap.add_argument("--ps", default=os.environ.get("PS_PATH", DEFAULT_PS),
-                    help="path to the pokemon-showdown npm package (env PS_PATH)")
+    ap.add_argument("--ps", default=os.environ.get("PS_PATH") or os.environ.get("PS_DIR") or "",
+                    help="path to the pokemon-showdown npm package (env PS_PATH or PS_DIR)")
     ap.add_argument("--node", default=None, help="node binary (env NODE; default: PATH, then ~/.nvm)")
     ap.add_argument("--format", default="gen1ou")
     ap.add_argument("--schema-only", action="store_true")
