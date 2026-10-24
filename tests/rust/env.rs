@@ -69,6 +69,7 @@ impl Bufs {
             turns: &mut self.turns,
             opp_action: &mut self.opp_action,
             error: &mut self.error,
+            final_obs: None,
         }
     }
 }
@@ -129,7 +130,7 @@ fn clone_restore_round_trip() {
         first.push((b.obs.clone(), b.mask.clone(), b.reward.clone(), b.done.clone()));
     }
     for (i, blob) in blobs.iter().enumerate() {
-        v.restore_state(i, blob).unwrap();
+        v.restore_state(i, blob, None).unwrap();
         assert_eq!(&v.clone_state(i), blob, "blob round-trip");
     }
     rng = rng_saved;
@@ -141,7 +142,7 @@ fn clone_restore_round_trip() {
         assert_eq!(f.2, b.reward);
         assert_eq!(f.3, b.done);
     }
-    assert!(v.restore_state(0, &[1, 2, 3]).is_err());
+    assert!(v.restore_state(0, &[1, 2, 3], None).is_err());
 }
 
 #[test]
