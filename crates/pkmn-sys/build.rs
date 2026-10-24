@@ -4,12 +4,12 @@
 //! extension module.
 //!
 //! Environment overrides:
-//!   ZIG            path to the zig 0.16 binary (default: `zig` on PATH, then ~/tools/zig-*/zig)
+//!   ZIG            path to the zig 0.16 binary (default: `zig` on PATH)
 //!   PKMN_OPTIMIZE  zig optimize mode (default ReleaseFast; ReleaseSafe enables engine asserts)
 //!   PKMN_CPU       zig -Dcpu value (default: native)
 
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 fn find_zig() -> PathBuf {
@@ -19,24 +19,6 @@ fn find_zig() -> PathBuf {
     let on_path = Command::new("zig").arg("version").output();
     if matches!(on_path, Ok(ref o) if o.status.success()) {
         return PathBuf::from("zig");
-    }
-    if let Ok(home) = env::var("HOME") {
-        let tools = Path::new(&home).join("tools");
-        if let Ok(entries) = std::fs::read_dir(&tools) {
-            let mut candidates: Vec<PathBuf> = entries
-                .flatten()
-                .map(|e| e.path())
-                .filter(|p| {
-                    p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("zig-") && n.contains("0.16"))
-                })
-                .map(|p| p.join("zig"))
-                .filter(|p| p.exists())
-                .collect();
-            candidates.sort();
-            if let Some(z) = candidates.pop() {
-                return z;
-            }
-        }
     }
     panic!("could not find zig 0.16; set ZIG=/path/to/zig");
 }

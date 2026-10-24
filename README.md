@@ -11,6 +11,9 @@ can serve unmodified poke-env clients through a local Showdown-protocol server. 
 battles on one core, kanto writing Showdown's full battle log is 24-25x faster than Showdown, and
 its engine without text, which RL environments use, is about 900x faster ([Speed](#speed)).
 
+kanto is an unofficial fan project, not affiliated with or endorsed by Nintendo, Creatures Inc.,
+GAME FREAK inc. or The Pokémon Company ([License](#license)).
+
 ```python
 import numpy as np, kanto
 

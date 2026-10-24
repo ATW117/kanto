@@ -34,7 +34,7 @@ Chansey
 Snorlax
 - Body Slam
 - Rest
-- Self-Destruct
+- Earthquake
 - Reflect
 """,
     "export",
@@ -80,5 +80,6 @@ def test_poke_env_players_finish_battles(mode, team):
     assert p1.n_finished_battles == 12
     assert p1.n_won_battles + p2.n_won_battles + p1.n_tied_battles == 12
     assert server.finished == 12
-    # MaxBasePower beats Random most of the time.
+    # MaxBasePower beats Random most of the time (about 90% with TEAM, which has no Self-Destruct
+    # for it to pick).
     assert p2.n_won_battles >= 6

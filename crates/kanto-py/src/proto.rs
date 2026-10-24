@@ -352,7 +352,7 @@ pub fn convert_team(team: &str, format: &str, validate: bool) -> PyResult<String
 /// Problems Showdown's team validator would report for ``team`` in ``format`` (``"gen1ou"``):
 /// kanto's legality checks (Species Clause, learnsets, HP DV) plus the format's bans (Ubers,
 /// Dig/Fly, OHKO and Evasion Clauses, Nickname Clause, 0 EVs). Empty list = legal. Showdown's
-/// event-only/minimum-level checks are not reproduced (docs/AUDIT_2026-10.md).
+/// event-only/minimum-level checks are not reproduced.
 #[pyfunction]
 #[pyo3(signature = (team, format="gen1ou"))]
 pub fn validate_team(team: &str, format: &str) -> PyResult<Vec<String>> {

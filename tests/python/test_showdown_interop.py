@@ -121,6 +121,7 @@ def test_input_log_replays_identically_in_showdown(fmt):
         input="\n".join(lines) + "\n",
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env={**os.environ, "PS_DIR": ps},
         check=True,
     )
